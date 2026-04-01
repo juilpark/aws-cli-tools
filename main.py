@@ -12,7 +12,8 @@ from typing import Optional, List, Dict, Any
 
 import boto3
 import typer
-from botocore.exceptions import BotoCoreError, ClientError
+from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError, ConnectTimeoutError, EndpointConnectionError, ReadTimeoutError
 from dotenv import load_dotenv
 
 # Load environment variables from .env
@@ -27,8 +28,13 @@ DEFAULT_PROFILE = "default"
 DEFAULT_STS_REGION = "ap-northeast-2"
 CACHE_DIR = Path.home() / ".cache" / "aws-cli-tools"
 RESOLVE_CACHE_FILE = CACHE_DIR / "resolve-instance.json"
+REGION_FAILURE_CACHE_FILE = CACHE_DIR / "region-failures.json"
 INSTANCE_ID_CACHE_TTL_SECONDS = 300
 IP_CACHE_TTL_SECONDS = 60
+DEFAULT_CONNECT_TIMEOUT_SECONDS = 3
+DEFAULT_READ_TIMEOUT_SECONDS = 5
+DEFAULT_MAX_ATTEMPTS = 1
+REGION_FAILURE_CACHE_TTL_SECONDS = 300
 
 
 class AwsOperationError(Exception):
@@ -40,6 +46,14 @@ class AwsOperationError(Exception):
         self.region = region
         self.profile = profile
         super().__init__(str(error))
+
+
+def is_skippable_region_error(error: Exception) -> bool:
+    """Return True when a per-region error should not fail the entire lookup."""
+    if isinstance(error, AwsOperationError):
+        error = error.error
+
+    return isinstance(error, (ConnectTimeoutError, EndpointConnectionError, ReadTimeoutError))
 
 
 def is_instance_id(value: str) -> bool:
@@ -59,6 +73,19 @@ def is_ipv4_address(value: str) -> bool:
 def get_default_session() -> boto3.Session:
     """Create a boto3 session bound to the default AWS profile."""
     return boto3.Session(profile_name=DEFAULT_PROFILE)
+
+
+def build_boto_config(
+    connect_timeout: int = DEFAULT_CONNECT_TIMEOUT_SECONDS,
+    read_timeout: int = DEFAULT_READ_TIMEOUT_SECONDS,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+) -> Config:
+    """Build a botocore config with explicit network timeouts."""
+    return Config(
+        connect_timeout=connect_timeout,
+        read_timeout=read_timeout,
+        retries={"total_max_attempts": max_attempts, "mode": "standard"},
+    )
 
 
 def get_cache_ttl_seconds(target: str) -> int:
@@ -84,6 +111,56 @@ def save_resolve_cache(cache_data: Dict[str, Any]):
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     with open(RESOLVE_CACHE_FILE, "w") as cache_file:
         json.dump(cache_data, cache_file, indent=2, sort_keys=True)
+
+
+def load_region_failure_cache() -> Dict[str, Any]:
+    """Load the per-region failure cache from disk."""
+    if not REGION_FAILURE_CACHE_FILE.exists():
+        return {}
+
+    try:
+        with open(REGION_FAILURE_CACHE_FILE, "r") as cache_file:
+            data = json.load(cache_file)
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_region_failure_cache(cache_data: Dict[str, Any]):
+    """Persist the per-region failure cache to disk."""
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    with open(REGION_FAILURE_CACHE_FILE, "w") as cache_file:
+        json.dump(cache_data, cache_file, indent=2, sort_keys=True)
+
+
+def get_region_failure_entry(region: str) -> Optional[Dict[str, Any]]:
+    """Return a valid cached region failure entry when it is still fresh."""
+    cache_data = load_region_failure_cache()
+    entry = cache_data.get(region)
+    if not isinstance(entry, dict):
+        return None
+
+    expires_at = entry.get("expires_at")
+    if not isinstance(expires_at, (int, float)):
+        return None
+
+    if expires_at <= time.time():
+        cache_data.pop(region, None)
+        save_region_failure_cache(cache_data)
+        return None
+
+    return entry
+
+
+def cache_region_failure(region: str, error: Exception, ttl_seconds: int = REGION_FAILURE_CACHE_TTL_SECONDS):
+    """Store a temporary region failure entry so repeated timeouts can be skipped."""
+    cache_data = load_region_failure_cache()
+    cache_data[region] = {
+        "cached_at": int(time.time()),
+        "expires_at": int(time.time()) + ttl_seconds,
+        "error": str(error),
+    }
+    save_region_failure_cache(cache_data)
 
 
 def get_cached_resolve_result(target: str) -> Optional[List[Dict[str, Any]]]:
@@ -120,7 +197,7 @@ def cache_resolve_result(target: str, matches: List[Dict[str, Any]]):
 def get_all_regions() -> List[str]:
     """Fetch all EC2 regions using the default profile."""
     session = get_default_session()
-    ec2 = session.client("ec2", region_name="us-east-1")
+    ec2 = session.client("ec2", region_name="us-east-1", config=build_boto_config())
     try:
         response = ec2.describe_regions()
         return sorted(region["RegionName"] for region in response["Regions"])
@@ -136,7 +213,7 @@ def get_all_regions() -> List[str]:
 def get_enabled_regions() -> List[str]:
     """Fetch regions that are available to the account."""
     session = get_default_session()
-    ec2 = session.client("ec2", region_name="us-east-1")
+    ec2 = session.client("ec2", region_name="us-east-1", config=build_boto_config())
     try:
         response = ec2.describe_regions(AllRegions=True)
         return sorted(
@@ -172,10 +249,25 @@ def extract_instance_matches(reservations: List[Dict[str, Any]], region: str) ->
     return matches
 
 
-def resolve_instance_matches_in_region(region: str, target: str, target_kind: str) -> List[Dict[str, Any]]:
+def resolve_instance_matches_in_region(
+    region: str,
+    target: str,
+    target_kind: str,
+    connect_timeout: int = DEFAULT_CONNECT_TIMEOUT_SECONDS,
+    read_timeout: int = DEFAULT_READ_TIMEOUT_SECONDS,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+) -> List[Dict[str, Any]]:
     """Resolve an instance target within a single region."""
     session = get_default_session()
-    ec2 = session.client("ec2", region_name=region)
+    ec2 = session.client(
+        "ec2",
+        region_name=region,
+        config=build_boto_config(
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+            max_attempts=max_attempts,
+        ),
+    )
     matches: List[Dict[str, Any]] = []
 
     try:
@@ -212,6 +304,13 @@ def resolve_instance_matches_in_region(region: str, target: str, target_kind: st
             region=region,
             profile=DEFAULT_PROFILE,
         ) from error
+    except BotoCoreError as error:
+        raise AwsOperationError(
+            operation="ec2.describe_instances",
+            error=error,
+            region=region,
+            profile=DEFAULT_PROFILE,
+        ) from error
 
     if target_kind != "ip":
         return matches
@@ -235,15 +334,29 @@ def resolve_instance_matches_in_region(region: str, target: str, target_kind: st
             region=region,
             profile=DEFAULT_PROFILE,
         ) from error
+    except BotoCoreError as error:
+        raise AwsOperationError(
+            operation="ec2.describe_instances",
+            error=error,
+            region=region,
+            profile=DEFAULT_PROFILE,
+        ) from error
 
     return matches
 
 
-def resolve_instance_matches(target: str) -> List[Dict[str, Any]]:
+def resolve_instance_matches(
+    target: str,
+    on_first_match: Optional[Any] = None,
+    connect_timeout: int = DEFAULT_CONNECT_TIMEOUT_SECONDS,
+    read_timeout: int = DEFAULT_READ_TIMEOUT_SECONDS,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+) -> List[Dict[str, Any]]:
     """Resolve an EC2 instance by instance id or IP across enabled regions."""
     regions = get_enabled_regions()
     matches: List[Dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
+    first_match_reported = False
     if is_instance_id(target):
         target_kind = "instance_id"
     elif is_ipv4_address(target):
@@ -251,22 +364,75 @@ def resolve_instance_matches(target: str) -> List[Dict[str, Any]]:
     else:
         target_kind = "name"
 
-    max_workers = min(12, len(regions)) or 1
+    active_regions: List[str] = []
+    for region in regions:
+        failure_entry = get_region_failure_entry(region)
+        if failure_entry is not None:
+            expires_at = int(failure_entry["expires_at"])
+            remaining_seconds = max(0, expires_at - int(time.time()))
+            typer.secho(
+                f"Skipping region [{region}] due to cached failure for {remaining_seconds}s more: {failure_entry.get('error', 'unknown error')}",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
+            continue
+        active_regions.append(region)
+
+    max_workers = min(12, len(active_regions)) or 1
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_region = {
-            executor.submit(resolve_instance_matches_in_region, region, target, target_kind): region
-            for region in regions
+            executor.submit(
+                resolve_instance_matches_in_region,
+                region,
+                target,
+                target_kind,
+                connect_timeout,
+                read_timeout,
+                max_attempts,
+            ): region
+            for region in active_regions
         }
 
         for future in as_completed(future_to_region):
-            region_matches = future.result()
+            region = future_to_region[future]
+            try:
+                region_matches = future.result()
+            except AwsOperationError as error:
+                if is_skippable_region_error(error):
+                    cache_region_failure(region, error.error)
+                    typer.secho(
+                        f"Warning: skipping region [{region}] due to network timeout/error: {error.error}",
+                        fg=typer.colors.YELLOW,
+                        err=True,
+                    )
+                    continue
+                raise
+
             for match in region_matches:
                 key = (match["region"], match["instance_id"])
                 if key not in seen:
                     seen.add(key)
                     matches.append(match)
+                    if not first_match_reported and on_first_match is not None:
+                        on_first_match(match)
+                        first_match_reported = True
 
     return matches
+
+
+def build_ssm_command(match: Dict[str, Any]) -> List[str]:
+    """Build the AWS CLI command used to start an SSM session."""
+    return [
+        "aws",
+        "ssm",
+        "start-session",
+        "--target",
+        match["instance_id"],
+        "--region",
+        match["region"],
+        "--profile",
+        DEFAULT_PROFILE,
+    ]
 
 
 def print_instance_matches(matches: List[Dict[str, Any]]):
@@ -544,6 +710,24 @@ def region_loop(
 def resolve_instance(
     target: str = typer.Argument(..., help="EC2 instance id, IP address, or Name tag value to resolve"),
     no_cache: bool = typer.Option(False, "--no-cache", help="Bypass the local resolver cache"),
+    connect_timeout: int = typer.Option(
+        DEFAULT_CONNECT_TIMEOUT_SECONDS,
+        "--connect-timeout",
+        min=1,
+        help="EC2 API connection timeout in seconds for each region lookup",
+    ),
+    read_timeout: int = typer.Option(
+        DEFAULT_READ_TIMEOUT_SECONDS,
+        "--read-timeout",
+        min=1,
+        help="EC2 API read timeout in seconds for each region lookup",
+    ),
+    max_attempts: int = typer.Option(
+        DEFAULT_MAX_ATTEMPTS,
+        "--max-attempts",
+        min=1,
+        help="Total EC2 API attempts per region lookup, including retries",
+    ),
 ):
     """
     Resolve an EC2 instance id, IP address, or Name tag value to region and instance metadata.
@@ -555,7 +739,12 @@ def resolve_instance(
         if matches is not None:
             cache_hit = True
         else:
-            matches = resolve_instance_matches(target)
+            matches = resolve_instance_matches(
+                target,
+                connect_timeout=connect_timeout,
+                read_timeout=read_timeout,
+                max_attempts=max_attempts,
+            )
             if len(matches) == 1:
                 cache_resolve_result(target, matches)
 
@@ -589,12 +778,31 @@ def resolve_instance(
 def ssm(
     target: str = typer.Argument(..., help="EC2 instance id, IP address, or Name tag value to start an SSM session against"),
     no_cache: bool = typer.Option(False, "--no-cache", help="Bypass the local resolver cache"),
+    connect_timeout: int = typer.Option(
+        DEFAULT_CONNECT_TIMEOUT_SECONDS,
+        "--connect-timeout",
+        min=1,
+        help="EC2 API connection timeout in seconds for each region lookup",
+    ),
+    read_timeout: int = typer.Option(
+        DEFAULT_READ_TIMEOUT_SECONDS,
+        "--read-timeout",
+        min=1,
+        help="EC2 API read timeout in seconds for each region lookup",
+    ),
+    max_attempts: int = typer.Option(
+        DEFAULT_MAX_ATTEMPTS,
+        "--max-attempts",
+        min=1,
+        help="Total EC2 API attempts per region lookup, including retries",
+    ),
 ):
     """
     Resolve the target and start an AWS SSM session.
     """
     try:
         cache_hit = False
+        preview_command_printed = False
         if shutil.which("aws") is None:
             typer.secho("AWS CLI not found in PATH.", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1)
@@ -604,7 +812,21 @@ def ssm(
         if matches is not None:
             cache_hit = True
         else:
-            matches = resolve_instance_matches(target)
+            def print_first_match_command(match: Dict[str, Any]):
+                nonlocal preview_command_printed
+                if preview_command_printed:
+                    return
+                preview_command_printed = True
+                typer.secho("First match found. You can try this SSM command immediately:", fg=typer.colors.CYAN)
+                typer.echo(" ".join(shlex.quote(part) for part in build_ssm_command(match)))
+
+            matches = resolve_instance_matches(
+                target,
+                on_first_match=print_first_match_command,
+                connect_timeout=connect_timeout,
+                read_timeout=read_timeout,
+                max_attempts=max_attempts,
+            )
             if len(matches) == 1:
                 cache_resolve_result(target, matches)
 
@@ -622,17 +844,7 @@ def ssm(
             raise typer.Exit(code=1)
 
         match = matches[0]
-        command = [
-            "aws",
-            "ssm",
-            "start-session",
-            "--target",
-            match["instance_id"],
-            "--region",
-            match["region"],
-            "--profile",
-            DEFAULT_PROFILE,
-        ]
+        command = build_ssm_command(match)
 
         if cache_hit:
             typer.secho("Cache hit: using cached resolver result.", fg=typer.colors.CYAN)
