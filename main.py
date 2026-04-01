@@ -803,7 +803,8 @@ def ssm(
     try:
         cache_hit = False
         preview_command_printed = False
-        if shutil.which("aws") is None:
+        aws_cli_path = shutil.which("aws")
+        if aws_cli_path is None:
             typer.secho("AWS CLI not found in PATH.", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1)
 
@@ -852,8 +853,9 @@ def ssm(
         print_instance_matches([match])
         typer.echo("Starting SSM session:")
         typer.echo(" ".join(shlex.quote(part) for part in command))
-
-        subprocess.run(command, check=False)
+        # Replace the current process instead of spawning a long-lived parent
+        # so the interactive SSM session behaves like a direct `aws ssm` call.
+        os.execv(aws_cli_path, [aws_cli_path, *command[1:]])
     except (AwsOperationError, BotoCoreError, ClientError) as e:
         print_aws_error(e)
         raise typer.Exit(code=1)
