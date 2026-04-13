@@ -32,11 +32,8 @@ uv sync
 도움말은 아래 명령으로 확인할 수 있습니다.
 
 ```bash
-uv run python3 main.py --help
+uv run aws-cli-tools --help
 ```
-
-참고:
-`pyproject.toml`에는 `aws-cli-tools` 스크립트 엔트리포인트가 등록되어 있지만, 현재 로컬 확인에서는 `uv run aws-cli-tools --help`가 바로 실행되지 않았습니다. 처음 사용할 때는 `uv run python3 main.py ...` 형식을 기준으로 사용하는 것이 안전합니다.
 
 ## 빠른 시작
 
@@ -65,7 +62,7 @@ AWS_REGION_PRIORITY=ap-northeast-2,ap-northeast-1,us-west-2
 예시:
 
 ```bash
-uv run python3 main.py login --source-profile example_source_profile --target-profile default
+uv run aws-cli-tools login --source-profile example_source_profile --target-profile default
 ```
 
 동작 방식:
@@ -86,7 +83,7 @@ uv run python3 main.py login --source-profile example_source_profile --target-pr
 예시:
 
 ```bash
-uv run python3 main.py login \
+uv run aws-cli-tools login \
   --source-profile example_source_profile \
   --target-profile default \
   --duration 3600 \
@@ -103,7 +100,7 @@ uv run python3 main.py login \
 ### 3. 모든 리전에 같은 AWS CLI 명령 실행
 
 ```bash
-uv run python3 main.py region-loop --profile default
+uv run aws-cli-tools region-loop --profile default
 ```
 
 실행하면 프롬프트가 나타나고, 아래처럼 실제 `aws` 명령을 입력합니다.
@@ -127,9 +124,9 @@ aws ec2 describe-vpcs
 인스턴스 ID, 사설/공인 IP, Name 태그 중 하나로 조회할 수 있습니다.
 
 ```bash
-uv run python3 main.py resolve-instance i-0123456789abcdef0
-uv run python3 main.py resolve-instance 10.0.0.15
-uv run python3 main.py resolve-instance my-app-web-01
+uv run aws-cli-tools resolve-instance i-0123456789abcdef0
+uv run aws-cli-tools resolve-instance 10.0.0.15
+uv run aws-cli-tools resolve-instance my-app-web-01
 ```
 
 동작 방식:
@@ -143,16 +140,16 @@ uv run python3 main.py resolve-instance my-app-web-01
 캐시를 무시하려면:
 
 ```bash
-uv run python3 main.py resolve-instance my-app-web-01 --no-cache
+uv run aws-cli-tools resolve-instance my-app-web-01 --no-cache
 ```
 
 ### 5. 바로 SSM 접속하기
 
 ```bash
-uv run python3 main.py ssm
-uv run python3 main.py ssm i-0123456789abcdef0
-uv run python3 main.py ssm 10.0.0.15
-uv run python3 main.py ssm my-app-web-01
+uv run aws-cli-tools ssm
+uv run aws-cli-tools ssm i-0123456789abcdef0
+uv run aws-cli-tools ssm 10.0.0.15
+uv run aws-cli-tools ssm my-app-web-01
 ```
 
 이 명령은 두 가지 방식으로 동작합니다.
@@ -181,19 +178,19 @@ aws ssm start-session --target <instance-id> --region <region> --profile default
 ### 6. 버전 확인
 
 ```bash
-uv run python3 main.py version
+uv run aws-cli-tools version
 ```
 
 ## 자주 쓰는 명령 모음
 
 ```bash
 uv sync
-uv run python3 main.py --help
-uv run python3 main.py login --help
-uv run python3 main.py region-loop --help
-uv run python3 main.py resolve-instance --help
-uv run python3 main.py ssm --help
-uv run python3 main.py version
+uv run aws-cli-tools --help
+uv run aws-cli-tools login --help
+uv run aws-cli-tools region-loop --help
+uv run aws-cli-tools resolve-instance --help
+uv run aws-cli-tools ssm --help
+uv run aws-cli-tools version
 ```
 
 ## 파일에 어떤 영향이 있나요?
@@ -211,7 +208,7 @@ uv run python3 main.py version
 
 ## 문제 해결
 
-### `uv run aws-cli-tools --help`가 실행되지 않을 때
+### 엔트리포인트가 실행되지 않을 때
 
 우선 아래 명령으로 실행해 보세요.
 

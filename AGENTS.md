@@ -4,8 +4,17 @@
 
 - Repository name: `aws-cli-tools`
 - Purpose: a small Typer-based Python CLI for AWS account workflows.
-- Primary entrypoint: `main.py`
-- Package entrypoint: `aws-cli-tools = "main:app"` in `pyproject.toml`
+- Primary CLI app wiring: `aws_cli_tools/app.py`
+- Compatibility entrypoint: `main.py`
+- Package entrypoint: `aws-cli-tools = "aws_cli_tools.app:app"` in `pyproject.toml`
+
+## Versioning Policy
+
+- Current application version: `0.1.1`
+- Do not bump the MAJOR version unless the user explicitly asks for it.
+- Bump the MINOR version when existing functionality is changed in a meaningful way or new functionality is added.
+- Bump the PATCH version for typo fixes, bug fixes, and internal refactors that do not intentionally expand the feature set.
+- When the version changes, update all user-facing version declarations together, including `pyproject.toml`, `aws_cli_tools/constants.py`, and any lockfile metadata that records the project version.
 
 ## Current Scope
 
@@ -31,7 +40,16 @@ The project currently exposes five CLI commands:
 
 ## Repository Layout
 
-- `main.py`: all application logic lives here.
+- `main.py`: thin compatibility entrypoint that imports and runs the package app.
+- `aws_cli_tools/`: application package.
+- `aws_cli_tools/app.py`: Typer app construction and command registration.
+- `aws_cli_tools/commands/`: one module per CLI command.
+- `aws_cli_tools/aws_common.py`: shared AWS session, region, and config helpers.
+- `aws_cli_tools/cache.py`: local cache helpers for resolver and region failures.
+- `aws_cli_tools/instances.py`: EC2 instance resolution and normalization logic.
+- `aws_cli_tools/ssm_targets.py`: SSM target discovery and command construction.
+- `aws_cli_tools/ui.py`: Textual UI for interactive SSM target selection.
+- `aws_cli_tools/output.py`: Rich/Typer output helpers.
 - `pyproject.toml`: package metadata, Python requirement, dependencies, and CLI script registration.
 - `uv.lock`: lockfile for `uv`.
 - `.env-example`: sample environment variable for MFA serial configuration.
@@ -44,6 +62,7 @@ The project currently exposes five CLI commands:
 - AWS SDK: `boto3`
 - Env loading: `python-dotenv`
 - Dependency manager: `uv`
+- Packaging for local entrypoint installs: `[tool.uv] package = true`
 
 ### Declared Python Version
 
@@ -58,7 +77,8 @@ Be careful when changing this:
 ## Common Commands
 
 - Install dependencies: `uv sync`
-- Show CLI help: `uv run python3 main.py --help`
+- Show CLI help: `uv run aws-cli-tools --help`
+- Show compatibility wrapper help: `uv run python3 main.py --help`
 - Show installed script help: `uv run aws-cli-tools --help`
 - Run login flow: `uv run aws-cli-tools login`
 - Run region loop: `uv run aws-cli-tools region-loop`
@@ -99,7 +119,6 @@ Any change to `login` should be reviewed carefully because it can affect a devel
 - No automated tests were found.
 - No lint or formatting configuration was found.
 - No CI configuration was found.
-- The installed script entrypoint was not directly runnable via `uv run aws-cli-tools --help` in local verification.
 
 ## Suggested Next Improvements
 
@@ -109,19 +128,20 @@ Any change to `login` should be reviewed carefully because it can affect a devel
 - Add tests for `ssm`, especially command construction and AWS CLI availability checks.
 - Consider validating that the `aws` CLI exists before entering the region loop.
 - Consider clarifying or revisiting the Python `>=3.14` requirement.
-- Investigate why `uv run aws-cli-tools --help` does not currently resolve the declared console script in the local environment.
 
 ## Verification Performed
 
-- Inspected `main.py`, `pyproject.toml`, `.env-example`, and `.gitignore`.
+- Inspected `main.py`, `pyproject.toml`, `aws_cli_tools/`, `.env-example`, and `.gitignore`.
+- Refreshed the local `uv` environment with:
+  - `uv sync`
 - Verified CLI command registration with:
+  - `uv run aws-cli-tools --help`
   - `uv run python3 main.py --help`
 - Verified per-command help with:
   - `uv run python3 main.py login --help`
   - `uv run python3 main.py region-loop --help`
   - `uv run python3 main.py resolve-instance --help`
   - `uv run python3 main.py ssm --help`
-- Attempted installed script help with:
-  - `uv run aws-cli-tools --help` (failed: executable not found)
+  - `uv run aws-cli-tools version`
 
 No code behavior beyond help output was executed, to avoid modifying real AWS credential files or running AWS commands.
