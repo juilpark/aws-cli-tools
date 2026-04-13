@@ -35,6 +35,7 @@ DEFAULT_CONNECT_TIMEOUT_SECONDS = 3
 DEFAULT_READ_TIMEOUT_SECONDS = 5
 DEFAULT_MAX_ATTEMPTS = 1
 REGION_FAILURE_CACHE_TTL_SECONDS = 300
+REGION_PRIORITY_ENV_VAR = "AWS_REGION_PRIORITY"
 
 
 class AwsOperationError(Exception):
@@ -91,6 +92,34 @@ def build_boto_config(
 def get_cache_ttl_seconds(target: str) -> int:
     """Return cache TTL based on target type."""
     return INSTANCE_ID_CACHE_TTL_SECONDS if is_instance_id(target) else IP_CACHE_TTL_SECONDS
+
+
+def parse_region_priority_env() -> List[str]:
+    """Parse the optional region-priority environment variable."""
+    raw_value = os.getenv(REGION_PRIORITY_ENV_VAR, "")
+    if not raw_value.strip():
+        return []
+
+    ordered_regions: List[str] = []
+    seen: set[str] = set()
+    for region in raw_value.split(","):
+        normalized = region.strip()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            ordered_regions.append(normalized)
+    return ordered_regions
+
+
+def order_regions_by_priority(regions: List[str]) -> List[str]:
+    """Move prioritized regions to the front while preserving relative order."""
+    priority_regions = parse_region_priority_env()
+    if not priority_regions:
+        return sorted(regions)
+
+    available_regions = set(regions)
+    prioritized = [region for region in priority_regions if region in available_regions]
+    remaining = sorted(region for region in regions if region not in set(prioritized))
+    return prioritized + remaining
 
 
 def load_resolve_cache() -> Dict[str, Any]:
@@ -200,7 +229,7 @@ def get_all_regions() -> List[str]:
     ec2 = session.client("ec2", region_name="us-east-1", config=build_boto_config())
     try:
         response = ec2.describe_regions()
-        return sorted(region["RegionName"] for region in response["Regions"])
+        return order_regions_by_priority([region["RegionName"] for region in response["Regions"]])
     except (BotoCoreError, ClientError) as error:
         raise AwsOperationError(
             operation="ec2.describe_regions",
@@ -216,10 +245,12 @@ def get_enabled_regions() -> List[str]:
     ec2 = session.client("ec2", region_name="us-east-1", config=build_boto_config())
     try:
         response = ec2.describe_regions(AllRegions=True)
-        return sorted(
-            region["RegionName"]
-            for region in response["Regions"]
-            if region.get("OptInStatus") in {"opt-in-not-required", "opted-in"}
+        return order_regions_by_priority(
+            [
+                region["RegionName"]
+                for region in response["Regions"]
+                if region.get("OptInStatus") in {"opt-in-not-required", "opted-in"}
+            ]
         )
     except (BotoCoreError, ClientError) as error:
         raise AwsOperationError(
@@ -651,7 +682,7 @@ def region_loop(
         
         typer.echo("Fetching available regions...")
         regions_resp = ec2.describe_regions()
-        regions = sorted([r["RegionName"] for r in regions_resp["Regions"]])
+        regions = order_regions_by_priority([r["RegionName"] for r in regions_resp["Regions"]])
         
         # Parse the command safely
         parts = shlex.split(command)
