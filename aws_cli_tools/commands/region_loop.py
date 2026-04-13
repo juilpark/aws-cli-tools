@@ -66,7 +66,10 @@ def region_loop(
     except (AwsOperationError, BotoCoreError, ClientError) as error:
         print_aws_error(error)
         raise typer.Exit(code=1)
+    except typer.Abort:
+        raise
+    except typer.Exit:
+        raise
     except Exception as error:
         typer.secho(f"An error occurred: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
-

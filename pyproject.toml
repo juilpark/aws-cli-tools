@@ -1,7 +1,11 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
 [project]
 name = "aws-cli-tools"
 version = "0.1.1"
-description = "Add your description here"
+description = "Useful Tools for AWS CLIs"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
@@ -15,5 +19,14 @@ dependencies = [
 [project.scripts]
 aws-cli-tools = "aws_cli_tools.app:app"
 
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+]
+
 [tool.uv]
 package = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
