@@ -8,6 +8,8 @@ dependencies = [
     "boto3>=1.42.70",
     "typer>=0.24.1",
     "python-dotenv>=1.0.1",
+    "rich>=14.3.3",
+    "textual>=6.1.0",
 ]
 
 [project.scripts]

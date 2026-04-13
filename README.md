@@ -55,6 +55,7 @@ cp .env-example .env
 ```env
 AWS_SOURCE_PROFILE=example_source_profile
 AWS_MFA_SERIAL=arn:aws:iam::123456789012:mfa/your-username
+AWS_REGION_PRIORITY=ap-northeast-2,ap-northeast-1,us-west-2
 ```
 
 `.env` 파일은 저장소에 커밋하지 않아야 하며, 현재 `.gitignore`에 포함되어 있습니다.
@@ -93,6 +94,8 @@ uv run python3 main.py login \
 ```
 
 `.env`에 `AWS_SOURCE_PROFILE`을 설정해 두면 `--source-profile` 옵션을 매번 넘기지 않아도 됩니다.
+
+리전 조회 우선순위를 앞당기고 싶다면 `.env`에 `AWS_REGION_PRIORITY`를 넣을 수 있습니다. 예를 들어 `ap-northeast-2,ap-northeast-1,us-west-2`처럼 지정하면, 인스턴스 조회와 SSM 대상 로딩 시 이 순서대로 먼저 조회하고 나머지 리전은 뒤이어 조회합니다.
 
 주의:
 `target_profile=default`는 실제 로컬 AWS 기본 자격 증명을 덮어쓸 수 있습니다. 기존에 장기 자격 증명을 쓰고 있다면 특히 조심해서 사용해야 합니다.
@@ -146,12 +149,24 @@ uv run python3 main.py resolve-instance my-app-web-01 --no-cache
 ### 5. 바로 SSM 접속하기
 
 ```bash
+uv run python3 main.py ssm
 uv run python3 main.py ssm i-0123456789abcdef0
 uv run python3 main.py ssm 10.0.0.15
 uv run python3 main.py ssm my-app-web-01
 ```
 
-이 명령은 먼저 대상을 조회한 뒤 아래와 비슷한 형식으로 SSM 세션을 시작합니다.
+이 명령은 두 가지 방식으로 동작합니다.
+
+- 인자를 생략하면: `Textual` 기반의 인터랙티브 테이블을 먼저 띄우고, 각 리전의 온라인 SSM 관리 대상 EC2 인스턴스가 조회되는 대로 목록이 계속 채워집니다.
+- 인자를 주면: 먼저 대상을 조회한 뒤, 단일 매치면 바로 접속하고 여러 개가 나오면 같은 테이블 UI에서 방향키로 하나를 고르게 합니다.
+
+조작 방법:
+
+- `↑` / `↓`: 서버 이동
+- `Enter`: 선택한 서버로 접속
+- `q` / `Esc`: 종료
+
+선택이 끝나면 아래와 비슷한 형식으로 SSM 세션을 시작합니다.
 
 ```bash
 aws ssm start-session --target <instance-id> --region <region> --profile default

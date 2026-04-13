@@ -15,12 +15,22 @@ import typer
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, ConnectTimeoutError, EndpointConnectionError, ReadTimeoutError
 from dotenv import load_dotenv
+from rich import box
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+from textual import on
+from textual.app import App, ComposeResult
+from textual.containers import Vertical
+from textual.message import Message
+from textual.widgets import DataTable, Footer, Header, Input, Static
 
 # Load environment variables from .env
 load_dotenv()
 
 app = typer.Typer(help="AWS CLI Tools")
-
+console = Console()
 AWS_DOT_AWS_DIR = Path.home() / ".aws"
 AWS_CREDENTIALS_FILE = AWS_DOT_AWS_DIR / "credentials"
 AWS_CONFIG_FILE = AWS_DOT_AWS_DIR / "config"
@@ -466,17 +476,465 @@ def build_ssm_command(match: Dict[str, Any]) -> List[str]:
     ]
 
 
+def describe_instances_by_ids_in_region(
+    region: str,
+    instance_ids: List[str],
+    connect_timeout: int = DEFAULT_CONNECT_TIMEOUT_SECONDS,
+    read_timeout: int = DEFAULT_READ_TIMEOUT_SECONDS,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+) -> List[Dict[str, Any]]:
+    """Fetch normalized EC2 instance metadata for specific instance ids in a region."""
+    if not instance_ids:
+        return []
+
+    session = get_default_session()
+    ec2 = session.client(
+        "ec2",
+        region_name=region,
+        config=build_boto_config(
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+            max_attempts=max_attempts,
+        ),
+    )
+    matches: List[Dict[str, Any]] = []
+
+    try:
+        for index in range(0, len(instance_ids), 100):
+            chunk = instance_ids[index:index + 100]
+            response = ec2.describe_instances(InstanceIds=chunk)
+            matches.extend(extract_instance_matches(response.get("Reservations", []), region))
+    except ClientError as error:
+        raise AwsOperationError(
+            operation="ec2.describe_instances",
+            error=error,
+            region=region,
+            profile=DEFAULT_PROFILE,
+        ) from error
+    except BotoCoreError as error:
+        raise AwsOperationError(
+            operation="ec2.describe_instances",
+            error=error,
+            region=region,
+            profile=DEFAULT_PROFILE,
+        ) from error
+
+    return matches
+
+
+def list_ssm_candidates_in_region(
+    region: str,
+    connect_timeout: int = DEFAULT_CONNECT_TIMEOUT_SECONDS,
+    read_timeout: int = DEFAULT_READ_TIMEOUT_SECONDS,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+) -> List[Dict[str, Any]]:
+    """List online SSM-managed EC2 instances in a single region."""
+    session = get_default_session()
+    ssm_client = session.client(
+        "ssm",
+        region_name=region,
+        config=build_boto_config(
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+            max_attempts=max_attempts,
+        ),
+    )
+
+    instance_ids: List[str] = []
+    try:
+        paginator = ssm_client.get_paginator("describe_instance_information")
+        for page in paginator.paginate(
+            Filters=[
+                {"Key": "PingStatus", "Values": ["Online"]},
+                {"Key": "ResourceType", "Values": ["EC2Instance"]},
+            ]
+        ):
+            for info in page.get("InstanceInformationList", []):
+                instance_id = info.get("InstanceId")
+                if instance_id and instance_id.startswith("i-"):
+                    instance_ids.append(instance_id)
+    except ClientError as error:
+        raise AwsOperationError(
+            operation="ssm.describe_instance_information",
+            error=error,
+            region=region,
+            profile=DEFAULT_PROFILE,
+        ) from error
+    except BotoCoreError as error:
+        raise AwsOperationError(
+            operation="ssm.describe_instance_information",
+            error=error,
+            region=region,
+            profile=DEFAULT_PROFILE,
+        ) from error
+
+    matches = describe_instances_by_ids_in_region(
+        region,
+        sorted(set(instance_ids)),
+        connect_timeout=connect_timeout,
+        read_timeout=read_timeout,
+        max_attempts=max_attempts,
+    )
+    return sorted(
+        matches,
+        key=lambda match: (
+            (match.get("name") or "").lower(),
+            match["region"],
+            match["instance_id"],
+        ),
+    )
+
+
 def print_instance_matches(matches: List[Dict[str, Any]]):
-    """Print resolved instance matches in a readable format."""
+    """Print resolved instance matches in a readable table."""
+    table = Table(box=box.SIMPLE_HEAVY, header_style="bold cyan")
+    table.add_column("Region", style="green")
+    table.add_column("Name", style="bold")
+    table.add_column("Instance ID", style="magenta")
+    table.add_column("Private IP")
+    table.add_column("Public IP")
+    table.add_column("State")
+
     for match in matches:
-        name_suffix = f", name={match['name']}" if match.get("name") else ""
-        private_ip = match.get("private_ip") or "-"
-        public_ip = match.get("public_ip") or "-"
-        state = match.get("state") or "unknown"
-        typer.echo(
-            f"- region={match['region']}, instance_id={match['instance_id']}, "
-            f"private_ip={private_ip}, public_ip={public_ip}, state={state}{name_suffix}"
+        table.add_row(
+            match["region"],
+            match.get("name") or "-",
+            match["instance_id"],
+            match.get("private_ip") or "-",
+            match.get("public_ip") or "-",
+            match.get("state") or "unknown",
         )
+
+    console.print(table)
+
+
+class SsmSelectionApp(App[Optional[Dict[str, Any]]]):
+    """Interactive Textual app for browsing and selecting SSM targets."""
+
+    CSS = """
+    Screen {
+        layout: vertical;
+    }
+
+    #body {
+        height: 1fr;
+    }
+
+    #status {
+        height: 2;
+        padding: 0 1;
+        content-align: left middle;
+    }
+
+    #search {
+        margin: 0 1;
+    }
+
+    DataTable {
+        height: 1fr;
+    }
+    """
+
+    BINDINGS = [
+        ("enter", "connect", "Connect"),
+        ("/", "focus_search", "Search"),
+        ("ctrl+l", "clear_search", "Clear Search"),
+        ("q", "quit", "Quit"),
+        ("escape", "quit", "Quit"),
+    ]
+
+    class RegionLoaded(Message):
+        def __init__(self, region: str, matches: List[Dict[str, Any]]) -> None:
+            self.region = region
+            self.matches = matches
+            super().__init__()
+
+    class RegionSkipped(Message):
+        def __init__(self, region: str, detail: str) -> None:
+            self.region = region
+            self.detail = detail
+            super().__init__()
+
+    class LoadingStarted(Message):
+        def __init__(self, total_regions: int) -> None:
+            self.total_regions = total_regions
+            super().__init__()
+
+    class LoadingFinished(Message):
+        def __init__(self) -> None:
+            super().__init__()
+
+    class LoadingFailed(Message):
+        def __init__(self, error: Exception) -> None:
+            self.error = error
+            super().__init__()
+
+    def __init__(
+        self,
+        *,
+        initial_matches: Optional[List[Dict[str, Any]]] = None,
+        title_text: str = "AWS SSM Targets",
+        status_text: str = "Use arrow keys to move, Enter to connect, Q to quit.",
+        live_load: bool = False,
+        connect_timeout: int = DEFAULT_CONNECT_TIMEOUT_SECONDS,
+        read_timeout: int = DEFAULT_READ_TIMEOUT_SECONDS,
+        max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    ) -> None:
+        super().__init__()
+        self.title = title_text
+        self.sub_title = "Arrow keys to move, Enter to connect"
+        self.initial_matches = initial_matches or []
+        self.initial_status_text = status_text
+        self.live_load = live_load
+        self.connect_timeout = connect_timeout
+        self.read_timeout = read_timeout
+        self.max_attempts = max_attempts
+        self.total_regions = 0
+        self.completed_regions = 0
+        self.total_matches = 0
+        self.search_query = ""
+        self.all_row_keys: List[str] = []
+        self.row_order: List[str] = []
+        self.matches_by_key: Dict[str, Dict[str, Any]] = {}
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with Vertical(id="body"):
+            yield Static(self.initial_status_text, id="status")
+            yield Input(placeholder="Press / to search...", id="search")
+            yield DataTable(id="instances")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        table = self.query_one("#instances", DataTable)
+        table.cursor_type = "row"
+        table.zebra_stripes = True
+        table.add_columns("Region", "Name", "Instance ID", "Private IP", "Public IP", "State")
+        table.focus()
+
+        for match in self.initial_matches:
+            self.add_match_row(match)
+
+        if self.live_load:
+            self.run_worker(self.load_candidates, thread=True, exclusive=True)
+        elif self.initial_matches:
+            self.update_status()
+
+    def action_focus_search(self) -> None:
+        self.query_one("#search", Input).focus()
+
+    def action_clear_search(self) -> None:
+        search_input = self.query_one("#search", Input)
+        search_input.value = ""
+        self.search_query = ""
+        self.refresh_table()
+        self.query_one("#instances", DataTable).focus()
+
+    def load_candidates(self) -> None:
+        try:
+            regions = get_enabled_regions()
+        except Exception as error:
+            self.post_message(self.LoadingFailed(error))
+            return
+
+        self.post_message(self.LoadingStarted(len(regions)))
+
+        active_regions: List[str] = []
+        for region in regions:
+            failure_entry = get_region_failure_entry(region)
+            if failure_entry is not None:
+                expires_at = int(failure_entry["expires_at"])
+                remaining_seconds = max(0, expires_at - int(time.time()))
+                self.post_message(
+                    self.RegionSkipped(
+                        region,
+                        f"cached failure for {remaining_seconds}s more: {failure_entry.get('error', 'unknown error')}",
+                    )
+                )
+                continue
+            active_regions.append(region)
+
+        max_workers = min(12, len(active_regions)) or 1
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_region = {
+                executor.submit(
+                    list_ssm_candidates_in_region,
+                    region,
+                    self.connect_timeout,
+                    self.read_timeout,
+                    self.max_attempts,
+                ): region
+                for region in active_regions
+            }
+
+            for future in as_completed(future_to_region):
+                region = future_to_region[future]
+                try:
+                    matches = future.result()
+                except AwsOperationError as error:
+                    if is_skippable_region_error(error):
+                        cache_region_failure(region, error.error)
+                        self.post_message(self.RegionSkipped(region, f"network timeout/error: {error.error}"))
+                        continue
+                    self.post_message(self.LoadingFailed(error))
+                    return
+                except Exception as error:
+                    self.post_message(self.LoadingFailed(error))
+                    return
+
+                self.post_message(self.RegionLoaded(region, matches))
+
+        self.post_message(self.LoadingFinished())
+
+    def add_match_row(self, match: Dict[str, Any]) -> None:
+        row_key = f"{match['region']}::{match['instance_id']}"
+        if row_key in self.matches_by_key:
+            return
+
+        self.matches_by_key[row_key] = match
+        self.all_row_keys.append(row_key)
+        self.total_matches += 1
+        self.refresh_table()
+
+    def get_match_search_text(self, match: Dict[str, Any]) -> str:
+        return " ".join(
+            [
+                match["region"],
+                match.get("name") or "-",
+                match["instance_id"],
+                match.get("private_ip") or "-",
+                match.get("public_ip") or "-",
+                match.get("state") or "unknown",
+            ]
+        ).lower()
+
+    def highlight_text(self, value: str) -> Text:
+        text = Text(value)
+        if not self.search_query:
+            return text
+
+        pattern = re.escape(self.search_query)
+        for found in re.finditer(pattern, value, re.IGNORECASE):
+            text.stylize("bold", found.start(), found.end())
+        return text
+
+    def row_matches_filter(self, match: Dict[str, Any]) -> bool:
+        if not self.search_query:
+            return True
+        return self.search_query.lower() in self.get_match_search_text(match)
+
+    def refresh_table(self) -> None:
+        table = self.query_one("#instances", DataTable)
+        table.clear(columns=False)
+        self.row_order = []
+
+        for row_key in self.all_row_keys:
+            match = self.matches_by_key[row_key]
+            if not self.row_matches_filter(match):
+                continue
+
+            self.row_order.append(row_key)
+            table.add_row(
+                self.highlight_text(match["region"]),
+                self.highlight_text(match.get("name") or "-"),
+                self.highlight_text(match["instance_id"]),
+                self.highlight_text(match.get("private_ip") or "-"),
+                self.highlight_text(match.get("public_ip") or "-"),
+                self.highlight_text(match.get("state") or "unknown"),
+                key=row_key,
+            )
+
+        if self.row_order:
+            table.move_cursor(row=0, column=0)
+
+    def update_status(self, extra: Optional[str] = None) -> None:
+        status = self.query_one("#status", Static)
+        visible_matches = len(self.row_order)
+        base_text = (
+            f"Loaded {self.total_matches} instance(s)"
+            f" from {self.completed_regions}/{self.total_regions} region(s). "
+            f"Showing {visible_matches}. Use arrow keys to move, / to search, Enter to connect, Q to quit."
+        )
+        if not self.live_load:
+            base_text = (
+                f"{self.total_matches} instance(s) ready. Showing {visible_matches}. "
+                "Use arrow keys to move, / to search, Enter to connect, Q to quit."
+            )
+        if self.search_query:
+            base_text = f"{base_text} [search: {self.search_query}]"
+        if extra:
+            base_text = f"{base_text} [{extra}]"
+        status.update(base_text)
+
+    def action_connect(self) -> None:
+        if not self.row_order:
+            self.bell()
+            return
+
+        table = self.query_one("#instances", DataTable)
+        cursor_row = table.cursor_row
+        if cursor_row < 0 or cursor_row >= len(self.row_order):
+            self.bell()
+            return
+
+        row_key = self.row_order[cursor_row]
+        self.exit(self.matches_by_key[row_key])
+
+    @on(DataTable.RowSelected)
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        table = event.control
+        cursor_row = table.cursor_row
+        if 0 <= cursor_row < len(self.row_order):
+            row_key = self.row_order[cursor_row]
+            self.exit(self.matches_by_key[row_key])
+
+    @on(Input.Changed, "#search")
+    def handle_search_changed(self, event: Input.Changed) -> None:
+        self.search_query = event.value.strip()
+        self.refresh_table()
+        self.update_status()
+
+    @on(Input.Submitted, "#search")
+    def handle_search_submitted(self, event: Input.Submitted) -> None:
+        if self.row_order:
+            self.query_one("#instances", DataTable).focus()
+        else:
+            event.input.focus()
+
+    @on(LoadingStarted)
+    def handle_loading_started(self, message: LoadingStarted) -> None:
+        self.total_regions = message.total_regions
+        self.completed_regions = 0
+        self.total_matches = 0
+        self.update_status("loading")
+
+    @on(RegionLoaded)
+    def handle_region_loaded(self, message: RegionLoaded) -> None:
+        self.completed_regions += 1
+        for match in sorted(
+            message.matches,
+            key=lambda match: ((match.get("name") or "").lower(), match["instance_id"]),
+        ):
+            self.add_match_row(match)
+        self.update_status(f"{message.region} done")
+
+    @on(RegionSkipped)
+    def handle_region_skipped(self, message: RegionSkipped) -> None:
+        self.completed_regions += 1
+        self.update_status(f"{message.region} skipped")
+
+    @on(LoadingFinished)
+    def handle_loading_finished(self, message: LoadingFinished) -> None:
+        if self.total_matches == 0:
+            self.query_one("#status", Static).update(
+                "No online SSM-manageable EC2 instances were found. Press Q to quit."
+            )
+            return
+        self.update_status("complete")
+
+    @on(LoadingFailed)
+    def handle_loading_failed(self, message: LoadingFailed) -> None:
+        self.exit(None, return_code=1, message=f"Failed to load SSM targets: {message.error}")
 
 
 def print_aws_error(error: Exception):
@@ -807,7 +1265,10 @@ def resolve_instance(
 
 @app.command()
 def ssm(
-    target: str = typer.Argument(..., help="EC2 instance id, IP address, or Name tag value to start an SSM session against"),
+    target: Optional[str] = typer.Argument(
+        None,
+        help="EC2 instance id, IP address, or Name tag value to start an SSM session against. Leave empty to browse online SSM targets.",
+    ),
     no_cache: bool = typer.Option(False, "--no-cache", help="Bypass the local resolver cache"),
     connect_timeout: int = typer.Option(
         DEFAULT_CONNECT_TIMEOUT_SECONDS,
@@ -834,56 +1295,86 @@ def ssm(
     try:
         cache_hit = False
         preview_command_printed = False
+        match: Optional[Dict[str, Any]] = None
         aws_cli_path = shutil.which("aws")
         if aws_cli_path is None:
             typer.secho("AWS CLI not found in PATH.", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1)
 
-        typer.echo(f"Resolving [{target}] using profile [{DEFAULT_PROFILE}] across enabled regions...")
-        matches = None if no_cache else get_cached_resolve_result(target)
-        if matches is not None:
-            cache_hit = True
-        else:
-            def print_first_match_command(match: Dict[str, Any]):
-                nonlocal preview_command_printed
-                if preview_command_printed:
-                    return
-                preview_command_printed = True
-                typer.secho("First match found. You can try this SSM command immediately:", fg=typer.colors.CYAN)
-                typer.echo(" ".join(shlex.quote(part) for part in build_ssm_command(match)))
-
-            matches = resolve_instance_matches(
-                target,
-                on_first_match=print_first_match_command,
+        if target is None:
+            match = SsmSelectionApp(
+                title_text="AWS SSM Targets",
+                status_text=f"Loading SSM targets with profile [{DEFAULT_PROFILE}]...",
+                live_load=True,
                 connect_timeout=connect_timeout,
                 read_timeout=read_timeout,
                 max_attempts=max_attempts,
-            )
-            if len(matches) == 1:
-                cache_resolve_result(target, matches)
+            ).run()
+            if match is None:
+                raise typer.Exit(code=1)
+        else:
+            typer.echo(f"Resolving [{target}] using profile [{DEFAULT_PROFILE}] across enabled regions...")
+            matches = None if no_cache else get_cached_resolve_result(target)
+            if matches is not None:
+                cache_hit = True
+            else:
+                def print_first_match_command(match: Dict[str, Any]):
+                    nonlocal preview_command_printed
+                    if preview_command_printed:
+                        return
+                    preview_command_printed = True
+                    console.print(Panel.fit(
+                        "First match found. You can use this command right away:",
+                        border_style="cyan",
+                        title="SSM Preview",
+                    ))
+                    console.print(f"[bold]{' '.join(shlex.quote(part) for part in build_ssm_command(match))}[/bold]")
 
-        if not matches:
-            typer.secho(f"No instance found for [{target}].", fg=typer.colors.RED, err=True)
+                matches = resolve_instance_matches(
+                    target,
+                    on_first_match=print_first_match_command,
+                    connect_timeout=connect_timeout,
+                    read_timeout=read_timeout,
+                    max_attempts=max_attempts,
+                )
+                if len(matches) == 1:
+                    cache_resolve_result(target, matches)
+
+            if not matches:
+                typer.secho(f"No instance found for [{target}].", fg=typer.colors.RED, err=True)
+                raise typer.Exit(code=1)
+
+            if len(matches) > 1:
+                match = SsmSelectionApp(
+                    initial_matches=sorted(
+                        matches,
+                        key=lambda item: (
+                            item["region"],
+                            (item.get("name") or "").lower(),
+                            item["instance_id"],
+                        ),
+                    ),
+                    title_text=f"SSM Matches for {target}",
+                    status_text=f"{len(matches)} instance(s) matched [{target}]. Use arrow keys to choose one.",
+                    live_load=False,
+                ).run()
+                if match is None:
+                    raise typer.Exit(code=1)
+            else:
+                match = matches[0]
+
+        if match is None:
+            typer.secho("No instance was selected.", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1)
 
-        if len(matches) > 1:
-            typer.secho(
-                f"Multiple instances matched [{target}]. Please resolve the ambiguity first.",
-                fg=typer.colors.RED,
-                err=True,
-            )
-            print_instance_matches(matches)
-            raise typer.Exit(code=1)
-
-        match = matches[0]
         command = build_ssm_command(match)
 
         if cache_hit:
             typer.secho("Cache hit: using cached resolver result.", fg=typer.colors.CYAN)
-        typer.echo("Resolved target:")
+        console.print(Panel.fit("Resolved target", border_style="green", title="SSM"))
         print_instance_matches([match])
-        typer.echo("Starting SSM session:")
-        typer.echo(" ".join(shlex.quote(part) for part in command))
+        console.print(Panel.fit("Starting SSM session", border_style="green", title="SSM"))
+        console.print(f"[bold]{' '.join(shlex.quote(part) for part in command)}[/bold]")
         # Replace the current process instead of spawning a long-lived parent
         # so the interactive SSM session behaves like a direct `aws ssm` call.
         os.execv(aws_cli_path, [aws_cli_path, *command[1:]])
