@@ -2,6 +2,8 @@ import importlib
 import typer
 from unittest.mock import Mock
 
+from botocore.exceptions import ClientError
+
 from aws_cli_tools.app import app
 
 
@@ -62,16 +64,8 @@ def test_ssm_without_target_uses_interactive_selector(monkeypatch, cli_runner, s
         lambda match: ["aws", "ssm", "start-session", "--target", match["instance_id"], "--region", match["region"], "--profile", "default"],
     )
 
-    selector_kwargs = {}
-
-    class FakeSelectorApp:
-        def __init__(self, **kwargs):
-            selector_kwargs.update(kwargs)
-
-        def run(self):
-            return sample_match[0]
-
-    monkeypatch.setattr(ssm_module, "SsmSelectionApp", FakeSelectorApp)
+    run_ssm_browser = Mock(return_value=(sample_match[0], None))
+    monkeypatch.setattr(ssm_module, "run_ssm_browser", run_ssm_browser)
 
     exec_calls = []
 
@@ -84,8 +78,7 @@ def test_ssm_without_target_uses_interactive_selector(monkeypatch, cli_runner, s
     result = cli_runner.invoke(app, ["ssm"])
 
     assert result.exit_code == 0
-    assert selector_kwargs["live_load"] is True
-    assert selector_kwargs["title_text"] == "AWS SSM Targets"
+    run_ssm_browser.assert_called_once()
     assert exec_calls[0][0] == "/usr/local/bin/aws"
 
 
@@ -168,3 +161,45 @@ def test_ssm_caches_single_resolved_match_before_exec(monkeypatch, cli_runner, s
     assert result.exit_code == 0
     cache_resolve_result.assert_called_once_with("example-instance", sample_match)
     assert exec_calls[0][0] == "/usr/local/bin/aws"
+
+
+def test_ssm_reauthenticates_once_when_browser_load_hits_request_expired(monkeypatch, cli_runner, sample_match):
+    ssm_module = importlib.import_module("aws_cli_tools.commands.ssm")
+
+    monkeypatch.setattr(ssm_module.shutil, "which", lambda binary: "/usr/local/bin/aws")
+    monkeypatch.setattr(ssm_module.console, "print", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ssm_module, "print_instance_matches", lambda matches: None)
+    monkeypatch.setattr(
+        ssm_module,
+        "build_ssm_command",
+        lambda match: ["aws", "ssm", "start-session", "--target", match["instance_id"], "--region", match["region"], "--profile", "default"],
+    )
+
+    request_expired = ClientError(
+        {
+            "Error": {"Code": "RequestExpired", "Message": "Request has expired."},
+            "ResponseMetadata": {"RequestId": "req-123", "HTTPStatusCode": 400},
+        },
+        "DescribeRegions",
+    )
+    run_ssm_browser = Mock(side_effect=[(None, request_expired), (sample_match[0], None)])
+    monkeypatch.setattr(ssm_module, "run_ssm_browser", run_ssm_browser)
+
+    run_login = Mock()
+    monkeypatch.setattr(ssm_module, "run_login", run_login)
+
+    exec_calls = []
+
+    def fake_execv(path, argv):
+        exec_calls.append((path, argv))
+        raise typer.Exit(code=0)
+
+    monkeypatch.setattr(ssm_module.os, "execv", fake_execv)
+
+    result = cli_runner.invoke(app, ["ssm"])
+
+    assert result.exit_code == 0
+    run_login.assert_called_once()
+    assert run_ssm_browser.call_count == 2
+    assert exec_calls[0][0] == "/usr/local/bin/aws"
+    assert "Running login and retrying once" in result.stdout

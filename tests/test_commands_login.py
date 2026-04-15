@@ -186,3 +186,37 @@ def test_login_prints_aws_error_and_exits_nonzero(tmp_path, monkeypatch, cli_run
 
     assert result.exit_code == 1
     print_aws_error.assert_called_once()
+
+
+def test_run_login_can_be_called_directly_without_typer_option_defaults(tmp_path, monkeypatch):
+    login_module = importlib.import_module("aws_cli_tools.commands.login")
+
+    aws_dir = tmp_path / ".aws"
+    credentials_path = aws_dir / "credentials"
+    config_path = aws_dir / "config"
+    aws_dir.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("[profile source]\nregion = us-west-2\n")
+
+    monkeypatch.setattr(login_module, "AWS_DOT_AWS_DIR", aws_dir)
+    monkeypatch.setattr(login_module, "AWS_CREDENTIALS_FILE", credentials_path)
+    monkeypatch.setattr(login_module, "AWS_CONFIG_FILE", config_path)
+    monkeypatch.setattr(login_module, "get_profile_region", lambda profile_name, session=None: "us-west-2")
+
+    sts_client = FakeStsClient(
+        response={
+            "Credentials": {
+                "AccessKeyId": "ASIADIRECT",
+                "SecretAccessKey": "secret-key",
+                "SessionToken": "session-token",
+                "Expiration": "2030-01-01T00:00:00+00:00",
+            }
+        }
+    )
+    monkeypatch.setattr(login_module.boto3, "Session", lambda profile_name: FakeSession(sts_client))
+
+    login_module.run_login(source_profile="source")
+
+    credentials = configparser.ConfigParser()
+    credentials.read(credentials_path)
+    assert credentials.get("default", "aws_access_key_id") == "ASIADIRECT"
+    assert sts_client.calls == [{"DurationSeconds": 28800}]

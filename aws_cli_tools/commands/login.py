@@ -12,18 +12,13 @@ from ..errors import AwsOperationError
 from ..output import print_aws_error
 
 
-def login(
-    source_profile: str = typer.Option(
-        os.getenv("AWS_SOURCE_PROFILE", "example_source_profile"),
-        help="The source AWS profile to use for STS authentication. Can also be set via AWS_SOURCE_PROFILE in .env",
-    ),
-    target_profile: str = typer.Option("default", help="The profile to update in credentials file"),
-    duration: int = typer.Option(28800, help="Duration in seconds (default 28800s / 8h)"),
-    mfa_serial: Optional[str] = typer.Option(
-        os.getenv("AWS_MFA_SERIAL"),
-        help="MFA Serial Number (ARN). Can also be set via AWS_MFA_SERIAL in .env",
-    ),
-    token_code: Optional[str] = typer.Option(None, help="MFA Token Code if required"),
+def run_login(
+    *,
+    source_profile: str,
+    target_profile: str = "default",
+    duration: int = 28800,
+    mfa_serial: Optional[str] = None,
+    token_code: Optional[str] = None,
 ) -> None:
     """
     Get temporary session token from AWS STS and update ~/.aws/credentials & config.
@@ -113,3 +108,26 @@ def login(
     except Exception as error:
         typer.secho(f"An error occurred: {error}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
+
+
+def login(
+    source_profile: str = typer.Option(
+        os.getenv("AWS_SOURCE_PROFILE", "example_source_profile"),
+        help="The source AWS profile to use for STS authentication. Can also be set via AWS_SOURCE_PROFILE in .env",
+    ),
+    target_profile: str = typer.Option("default", help="The profile to update in credentials file"),
+    duration: int = typer.Option(28800, help="Duration in seconds (default 28800s / 8h)"),
+    mfa_serial: Optional[str] = typer.Option(
+        os.getenv("AWS_MFA_SERIAL"),
+        help="MFA Serial Number (ARN). Can also be set via AWS_MFA_SERIAL in .env",
+    ),
+    token_code: Optional[str] = typer.Option(None, help="MFA Token Code if required"),
+) -> None:
+    """CLI wrapper for the login flow."""
+    run_login(
+        source_profile=source_profile,
+        target_profile=target_profile,
+        duration=duration,
+        mfa_serial=mfa_serial,
+        token_code=token_code,
+    )

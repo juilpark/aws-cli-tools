@@ -106,6 +106,7 @@ class SsmSelectionApp(App[Optional[InstanceMatch]]):
         self.all_row_keys: List[str] = []
         self.row_order: List[str] = []
         self.matches_by_key: Dict[str, InstanceMatch] = {}
+        self.loading_error: Optional[Exception] = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -344,5 +345,5 @@ class SsmSelectionApp(App[Optional[InstanceMatch]]):
 
     @on(LoadingFailed)
     def handle_loading_failed(self, message: LoadingFailed) -> None:
+        self.loading_error = message.error
         self.exit(None, return_code=1, message=f"Failed to load SSM targets: {message.error}")
-
