@@ -142,7 +142,8 @@ def test_login_prompts_for_mfa_token_when_serial_is_given(tmp_path, monkeypatch,
             "TokenCode": "123456",
         }
     ]
-    assert "Enter MFA Token Code" in result.stdout
+    assert "OTP Login" in result.stdout
+    assert "OTP:" in result.stdout
 
 
 def test_login_prints_aws_error_and_exits_nonzero(tmp_path, monkeypatch, cli_runner):

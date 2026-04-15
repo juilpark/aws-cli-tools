@@ -3,13 +3,44 @@ from typing import List, Optional
 import typer
 from botocore.exceptions import ClientError
 from rich import box
-from rich.console import Console
+from rich.console import Console, Group
+from rich.panel import Panel
+from rich.text import Text
 from rich.table import Table
 
 from .errors import AwsOperationError
 from .models import InstanceMatch
 
 console = Console()
+
+
+def _render_mfa_prompt(mfa_serial: str, token_code: str) -> Group:
+    title = Text("AWS login required", style="bold bright_white")
+
+    body = Text()
+    body.append("A new MFA code is needed to refresh your AWS session.\n", style="white")
+    body.append("MFA device: ", style="dim")
+    body.append(f"{mfa_serial}\n", style="cyan")
+    body.append("OTP code: ", style="dim")
+    body.append(token_code if token_code else "6-digit code", style="bold cyan")
+    body.append("\n")
+    body.append("The prompt will appear below this box.", style="dim")
+
+    prompt_box = Panel(
+        Group(title, Text(), body),
+        title="OTP Login",
+        border_style="yellow",
+        box=box.ROUNDED,
+        padding=(1, 2),
+        width=min(76, max(52, console.size.width - 4)),
+    )
+    return Group(prompt_box)
+
+
+def prompt_mfa_token(mfa_serial: str) -> str:
+    """Show a styled MFA notice, then collect the token with the normal terminal prompt."""
+    console.print(_render_mfa_prompt(mfa_serial, ""))
+    return typer.prompt("OTP")
 
 
 def print_instance_matches(matches: List[InstanceMatch]) -> None:
@@ -85,4 +116,3 @@ def print_aws_error(error: Exception) -> None:
         return
 
     typer.secho(f"AWS Error: {original_error}", fg=typer.colors.RED, err=True)
-

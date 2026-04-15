@@ -9,7 +9,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from ..aws_common import find_config_section, get_profile_region
 from ..constants import AWS_CONFIG_FILE, AWS_CREDENTIALS_FILE, AWS_DOT_AWS_DIR
 from ..errors import AwsOperationError
-from ..output import print_aws_error
+from ..output import print_aws_error, prompt_mfa_token
 
 
 def run_login(
@@ -47,7 +47,7 @@ def run_login(
             kwargs["SerialNumber"] = mfa_serial
             kwargs["TokenCode"] = token_code
         elif mfa_serial and not token_code:
-            token_code = typer.prompt(f"Enter MFA Token Code for {mfa_serial}")
+            token_code = prompt_mfa_token(mfa_serial)
             kwargs["SerialNumber"] = mfa_serial
             kwargs["TokenCode"] = token_code
 
