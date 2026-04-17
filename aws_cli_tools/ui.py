@@ -8,6 +8,7 @@ from textual import on
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
 from textual.message import Message
+from textual.widget import Widget
 from textual.widgets import DataTable, Footer, Header, Input, Static
 
 from .aws_common import get_enabled_regions
@@ -205,7 +206,14 @@ class SsmSelectionApp(App[Optional[InstanceMatch]]):
         self.matches_by_key[row_key] = match
         self.all_row_keys.append(row_key)
         self.total_matches += 1
-        self.refresh_table()
+        if not self.row_matches_filter(match):
+            return
+
+        table = self.query_one("#instances", DataTable)
+        had_visible_rows = bool(self.row_order)
+        self.append_row(table, row_key)
+        if not had_visible_rows:
+            self.restore_table_cursor(preferred_row_key=row_key, cursor_column=0)
 
     def get_match_search_text(self, match: InstanceMatch) -> str:
         return " ".join(
@@ -234,8 +242,45 @@ class SsmSelectionApp(App[Optional[InstanceMatch]]):
             return True
         return self.search_query.lower() in self.get_match_search_text(match)
 
+    def append_row(self, table: DataTable, row_key: str) -> None:
+        match = self.matches_by_key[row_key]
+        self.row_order.append(row_key)
+        table.add_row(
+            self.highlight_text(match["region"]),
+            self.highlight_text(match.get("name") or "-"),
+            self.highlight_text(match["instance_id"]),
+            self.highlight_text(match.get("private_ip") or "-"),
+            self.highlight_text(match.get("public_ip") or "-"),
+            self.highlight_text(match.get("state") or "unknown"),
+            key=row_key,
+        )
+
+    def get_selected_row_key(self) -> Optional[str]:
+        table = self.query_one("#instances", DataTable)
+        cursor_row = table.cursor_row
+        if 0 <= cursor_row < len(self.row_order):
+            return self.row_order[cursor_row]
+        return None
+
+    def restore_table_cursor(self, preferred_row_key: Optional[str], cursor_column: int) -> None:
+        if not self.row_order:
+            return
+
+        table = self.query_one("#instances", DataTable)
+        row_index = 0
+        if preferred_row_key and preferred_row_key in self.row_order:
+            row_index = table.get_row_index(preferred_row_key)
+        table.move_cursor(row=row_index, column=max(0, cursor_column), scroll=False)
+
+    def restore_focus(self, focused_widget: Optional[Widget]) -> None:
+        if focused_widget is not None and focused_widget.is_mounted and focused_widget.can_focus:
+            focused_widget.focus()
+
     def refresh_table(self) -> None:
         table = self.query_one("#instances", DataTable)
+        selected_row_key = self.get_selected_row_key()
+        cursor_column = table.cursor_column
+        focused_widget = self.focused
         table.clear(columns=False)
         self.row_order = []
 
@@ -244,19 +289,10 @@ class SsmSelectionApp(App[Optional[InstanceMatch]]):
             if not self.row_matches_filter(match):
                 continue
 
-            self.row_order.append(row_key)
-            table.add_row(
-                self.highlight_text(match["region"]),
-                self.highlight_text(match.get("name") or "-"),
-                self.highlight_text(match["instance_id"]),
-                self.highlight_text(match.get("private_ip") or "-"),
-                self.highlight_text(match.get("public_ip") or "-"),
-                self.highlight_text(match.get("state") or "unknown"),
-                key=row_key,
-            )
+            self.append_row(table, row_key)
 
-        if self.row_order:
-            table.move_cursor(row=0, column=0)
+        self.restore_table_cursor(preferred_row_key=selected_row_key, cursor_column=cursor_column)
+        self.restore_focus(focused_widget)
 
     def update_status(self, extra: Optional[str] = None) -> None:
         status = self.query_one("#status", Static)

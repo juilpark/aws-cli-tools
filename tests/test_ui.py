@@ -35,6 +35,8 @@ def test_ssm_selection_app_filters_and_clears_search():
             search = app.query_one("#search", Input)
 
             assert len(app.row_order) == 2
+            table.move_cursor(row=1, column=0)
+            assert app.row_order[table.cursor_row] == "us-west-2::i-0123456789abcdef1"
 
             search.value = "worker"
             app.handle_search_changed(Input.Changed(search, search.value))
@@ -42,6 +44,8 @@ def test_ssm_selection_app_filters_and_clears_search():
 
             assert app.search_query == "worker"
             assert app.row_order == ["us-west-2::i-0123456789abcdef1"]
+            assert table.cursor_row == 0
+            assert app.row_order[table.cursor_row] == "us-west-2::i-0123456789abcdef1"
 
             app.action_clear_search()
             await pilot.pause()
@@ -49,7 +53,65 @@ def test_ssm_selection_app_filters_and_clears_search():
             assert app.search_query == ""
             assert search.value == ""
             assert len(app.row_order) == 2
+            assert table.cursor_row == 1
+            assert app.row_order[table.cursor_row] == "us-west-2::i-0123456789abcdef1"
             assert app.query_one("#instances", DataTable).has_focus
+
+    asyncio.run(run())
+
+
+def test_ssm_selection_app_live_load_preserves_selected_row():
+    async def run():
+        app = SsmSelectionApp(initial_matches=SAMPLE_MATCHES, live_load=False)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            table = app.query_one("#instances", DataTable)
+            table.move_cursor(row=1, column=0)
+            selected_row_key = app.row_order[table.cursor_row]
+
+            app.handle_region_loaded(
+                app.RegionLoaded(
+                    "eu-west-1",
+                    [
+                        {
+                            "region": "eu-west-1",
+                            "instance_id": "i-0123456789abcdef2",
+                            "private_ip": "10.0.2.12",
+                            "public_ip": None,
+                            "state": "running",
+                            "name": "api-c",
+                        }
+                    ],
+                )
+            )
+            await pilot.pause()
+
+            assert len(app.row_order) == 3
+            assert table.cursor_row == 1
+            assert app.row_order[table.cursor_row] == selected_row_key
+
+    asyncio.run(run())
+
+
+def test_ssm_selection_app_filter_falls_back_to_first_visible_row():
+    async def run():
+        app = SsmSelectionApp(initial_matches=SAMPLE_MATCHES, live_load=False)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            table = app.query_one("#instances", DataTable)
+            search = app.query_one("#search", Input)
+            table.move_cursor(row=1, column=0)
+            assert app.row_order[table.cursor_row] == "us-west-2::i-0123456789abcdef1"
+
+            search.value = "web"
+            app.handle_search_changed(Input.Changed(search, search.value))
+            await pilot.pause()
+
+            assert app.row_order == ["ap-northeast-2::i-0123456789abcdef0"]
+            assert table.cursor_row == 0
+            assert app.row_order[table.cursor_row] == "ap-northeast-2::i-0123456789abcdef0"
 
     asyncio.run(run())
 
