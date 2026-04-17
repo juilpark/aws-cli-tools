@@ -10,7 +10,7 @@
 
 ## Versioning Policy
 
-- Current application version: `0.1.1`
+- Current application version: `0.2.0`
 - Do not bump the MAJOR version unless the user explicitly asks for it.
 - Bump the MINOR version when existing functionality is changed in a meaningful way or new functionality is added.
 - Bump the PATCH version for typo fixes, bug fixes, and internal refactors that do not intentionally expand the feature set.
@@ -24,6 +24,7 @@ The project currently exposes five CLI commands:
    - Uses `boto3` STS to request a temporary session token.
    - Writes temporary credentials into `~/.aws/credentials`.
    - Syncs profile settings from the source profile into `~/.aws/config`.
+   - When MFA is required and no `--token-code` is provided, shows a Rich-styled OTP notice box before collecting the code from the terminal prompt.
 2. `region-loop`
    - Prompts for an `aws ...` CLI command.
    - Fetches all AWS regions through EC2.
@@ -35,6 +36,7 @@ The project currently exposes five CLI commands:
 4. `ssm`
    - Resolves an instance target using the same logic as `resolve-instance`.
    - Starts an `aws ssm start-session` command against the matched instance.
+   - When interactive SSM target loading fails because AWS credentials are expired, attempts `login` once and retries the SSM flow.
 5. `version`
    - Prints the application version.
 
@@ -62,6 +64,7 @@ The project currently exposes five CLI commands:
 - AWS SDK: `boto3`
 - Env loading: `python-dotenv`
 - Dependency manager: `uv`
+- Coverage plugin: `pytest-cov`
 - Packaging for local entrypoint installs: `[tool.uv] package = true`
 
 ### Declared Python Version
@@ -83,12 +86,16 @@ Be careful when changing this:
 - Run login flow: `uv run aws-cli-tools login`
 - Run region loop: `uv run aws-cli-tools region-loop`
 - Show version: `uv run aws-cli-tools version`
+- Run all tests: `uv run pytest tests/`
+- Check coverage: `uv run pytest --cov aws_cli_tools tests/`
 
 ## Environment Notes
 
 - `.env` is auto-loaded on startup via `load_dotenv()`.
 - Expected variable from `.env-example`:
+  - `AWS_SOURCE_PROFILE`
   - `AWS_MFA_SERIAL`
+  - `AWS_REGION_PRIORITY`
 - `.env` is gitignored and should not be committed.
 
 ## External Side Effects
@@ -116,16 +123,14 @@ Any change to `login` should be reviewed carefully because it can affect a devel
 
 ## Missing Pieces
 
-- No automated tests were found.
+- Automated tests exist under `tests/`, including command coverage for `login`, `region-loop`, `resolve-instance`, `ssm`, cache helpers, region helpers, and target discovery.
 - No lint or formatting configuration was found.
 - No CI configuration was found.
 
 ## Suggested Next Improvements
 
-- Add tests for `login`, especially profile overwrite and config sync behavior.
-- Add tests for `region-loop` command assembly and confirmation flow.
-- Add tests for `resolve-instance` cache behavior, ambiguity handling, and region fan-out.
-- Add tests for `ssm`, especially command construction and AWS CLI availability checks.
+- Expand tests around the new Rich OTP login notice so terminal-facing UX changes are covered more explicitly.
+- Add higher-level tests for `ssm` re-authentication behavior beyond the current single retry path.
 - Consider validating that the `aws` CLI exists before entering the region loop.
 - Consider clarifying or revisiting the Python `>=3.14` requirement.
 
@@ -143,5 +148,11 @@ Any change to `login` should be reviewed carefully because it can affect a devel
   - `uv run python3 main.py resolve-instance --help`
   - `uv run python3 main.py ssm --help`
   - `uv run aws-cli-tools version`
+- Verified targeted tests with:
+  - `uv run pytest tests/test_commands_login.py tests/test_commands_ssm.py`
+- Verified expanded full test suite and coverage with:
+  - `uv run pytest tests/`
+  - `uv run pytest --cov aws_cli_tools tests/`
+  - Result observed during verification: `81 passed`, total coverage `93%`
 
 No code behavior beyond help output was executed, to avoid modifying real AWS credential files or running AWS commands.

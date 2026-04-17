@@ -70,7 +70,8 @@ uv run aws-cli-tools login --source-profile example_source_profile --target-prof
 - `source_profile`로 AWS STS에 세션 토큰을 요청합니다.
 - 발급된 임시 자격 증명을 `target_profile`에 기록합니다.
 - 가능하면 `~/.aws/config`에서 원본 프로필 설정도 함께 복사합니다.
-- MFA가 필요한 경우 토큰 코드를 묻거나, 옵션으로 직접 넘길 수 있습니다.
+- MFA가 필요한 경우, 먼저 Rich 스타일의 안내 박스를 보여준 뒤 OTP를 입력받습니다.
+- `--token-code`를 직접 넘기면 별도 프롬프트 없이 바로 진행합니다.
 
 자주 쓰는 옵션:
 
@@ -156,6 +157,7 @@ uv run aws-cli-tools ssm my-app-web-01
 
 - 인자를 생략하면: `Textual` 기반의 인터랙티브 테이블을 먼저 띄우고, 각 리전의 온라인 SSM 관리 대상 EC2 인스턴스가 조회되는 대로 목록이 계속 채워집니다.
 - 인자를 주면: 먼저 대상을 조회한 뒤, 단일 매치면 바로 접속하고 여러 개가 나오면 같은 테이블 UI에서 방향키로 하나를 고르게 합니다.
+- SSM 대상 로딩 중 자격 증명이 만료되어 `RequestExpired`가 발생하면, `login`을 한 번 자동 실행한 뒤 같은 흐름을 다시 시도합니다.
 
 조작 방법:
 
@@ -185,6 +187,8 @@ uv run aws-cli-tools version
 
 ```bash
 uv sync
+uv run pytest tests/
+uv run pytest --cov aws_cli_tools tests/
 uv run aws-cli-tools --help
 uv run aws-cli-tools login --help
 uv run aws-cli-tools region-loop --help
@@ -232,6 +236,11 @@ uv run python3 main.py --help
 - AWS CLI가 설치되어 있는지
 - 대상 인스턴스가 SSM Managed Instance인지
 - 해당 리전과 인스턴스에 접근 권한이 있는지
+- 자격 증명 만료로 `RequestExpired`가 발생했다면, 자동 `login` 재시도가 실패했는지 함께 확인할 것
+
+### 버전 정보
+
+현재 문서 기준 최신 애플리케이션 버전은 `0.2.0`입니다.
 
 ## 개발 메모
 
@@ -239,6 +248,7 @@ uv run python3 main.py --help
 - AWS SDK: `boto3`
 - 환경 변수 로딩: `python-dotenv`
 - 의존성 관리: `uv`
+- 테스트 커버리지 확인: `pytest-cov`
 
 ## 주의할 점
 
