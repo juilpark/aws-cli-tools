@@ -1,3 +1,6 @@
+import importlib
+from unittest.mock import Mock
+
 from typer.testing import CliRunner
 
 from aws_cli_tools.app import app
@@ -22,3 +25,13 @@ def test_root_help_lists_available_commands():
     assert "resolve-instance" in result.stdout
     assert "ssm" in result.stdout
     assert "version" in result.stdout
+
+
+def test_compatibility_entrypoint_version_function_prints_current_version(monkeypatch):
+    version_module = importlib.import_module("aws_cli_tools.commands.version")
+    echo = Mock()
+    monkeypatch.setattr(version_module.typer, "echo", echo)
+
+    version_module.version()
+
+    echo.assert_called_once_with(f"aws-cli-tools version {VERSION}")

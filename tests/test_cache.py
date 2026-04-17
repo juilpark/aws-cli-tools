@@ -74,3 +74,37 @@ def test_get_region_failure_entry_drops_expired_entries(
     assert cache_module.get_region_failure_entry("ap-northeast-2") is None
     assert json.loads(cache_module.REGION_FAILURE_CACHE_FILE.read_text()) == {}
 
+
+def test_load_resolve_cache_returns_empty_for_invalid_json(isolated_cache_paths):
+    cache_module.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_module.RESOLVE_CACHE_FILE.write_text("{not-json")
+
+    assert cache_module.load_resolve_cache() == {}
+
+
+def test_get_cached_resolve_result_rejects_invalid_entry_shape(isolated_cache_paths):
+    cache_module.save_resolve_cache(
+        {
+            "example-instance": {
+                "cached_at": 1,
+                "expires_at": "tomorrow",
+                "matches": "not-a-list",
+            }
+        }
+    )
+
+    assert cache_module.get_cached_resolve_result("example-instance") is None
+
+
+def test_get_region_failure_entry_rejects_invalid_entry_shape(isolated_cache_paths):
+    cache_module.save_region_failure_cache(
+        {
+            "ap-northeast-2": {
+                "cached_at": 1,
+                "expires_at": "tomorrow",
+                "error": "timeout",
+            }
+        }
+    )
+
+    assert cache_module.get_region_failure_entry("ap-northeast-2") is None

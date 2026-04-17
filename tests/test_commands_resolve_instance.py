@@ -1,6 +1,10 @@
 import importlib
 from unittest.mock import Mock
 
+import typer
+from unittest.mock import Mock
+
+from aws_cli_tools.errors import AwsOperationError
 from aws_cli_tools.app import app
 
 
@@ -72,3 +76,62 @@ def test_resolve_instance_exits_when_no_match_is_found(monkeypatch, cli_runner):
     assert result.exit_code == 1
     print_instance_matches.assert_not_called()
     assert "No instance found for [missing-instance]." in result.stderr
+
+
+def test_resolve_instance_bypasses_cache_when_no_cache_option_is_set(monkeypatch, cli_runner, sample_match):
+    resolve_instance_module = importlib.import_module("aws_cli_tools.commands.resolve_instance")
+
+    get_cached_resolve_result = Mock(return_value=sample_match)
+    resolve_instance_matches = Mock(return_value=sample_match)
+    print_instance_matches = Mock()
+    monkeypatch.setattr(resolve_instance_module, "get_cached_resolve_result", get_cached_resolve_result)
+    monkeypatch.setattr(resolve_instance_module, "resolve_instance_matches", resolve_instance_matches)
+    monkeypatch.setattr(resolve_instance_module, "print_instance_matches", print_instance_matches)
+
+    result = cli_runner.invoke(app, ["resolve-instance", "example-instance", "--no-cache"])
+
+    assert result.exit_code == 0
+    get_cached_resolve_result.assert_not_called()
+    resolve_instance_matches.assert_called_once()
+    print_instance_matches.assert_called_once_with(sample_match)
+
+
+def test_resolve_instance_prints_wrapped_aws_errors(monkeypatch, cli_runner):
+    resolve_instance_module = importlib.import_module("aws_cli_tools.commands.resolve_instance")
+
+    monkeypatch.setattr(resolve_instance_module, "get_cached_resolve_result", lambda target: None)
+    monkeypatch.setattr(
+        resolve_instance_module,
+        "resolve_instance_matches",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AwsOperationError(
+                operation="ec2.describe_instances",
+                error=RuntimeError("boom"),
+                region="ap-northeast-2",
+                profile="default",
+            )
+        ),
+    )
+    print_aws_error = Mock()
+    monkeypatch.setattr(resolve_instance_module, "print_aws_error", print_aws_error)
+
+    result = cli_runner.invoke(app, ["resolve-instance", "example-instance"])
+
+    assert result.exit_code == 1
+    print_aws_error.assert_called_once()
+
+
+def test_resolve_instance_handles_unexpected_errors(monkeypatch, cli_runner):
+    resolve_instance_module = importlib.import_module("aws_cli_tools.commands.resolve_instance")
+
+    monkeypatch.setattr(resolve_instance_module, "get_cached_resolve_result", lambda target: None)
+    monkeypatch.setattr(
+        resolve_instance_module,
+        "resolve_instance_matches",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    result = cli_runner.invoke(app, ["resolve-instance", "example-instance"])
+
+    assert result.exit_code == 1
+    assert "An error occurred: boom" in result.stderr

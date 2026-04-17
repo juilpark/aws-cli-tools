@@ -221,3 +221,94 @@ def test_run_login_can_be_called_directly_without_typer_option_defaults(tmp_path
     credentials.read(credentials_path)
     assert credentials.get("default", "aws_access_key_id") == "ASIADIRECT"
     assert sts_client.calls == [{"DurationSeconds": 28800}]
+
+
+def test_login_warns_before_overwriting_long_lived_profile(tmp_path, monkeypatch, cli_runner):
+    login_module = importlib.import_module("aws_cli_tools.commands.login")
+
+    aws_dir = tmp_path / ".aws"
+    credentials_path = aws_dir / "credentials"
+    config_path = aws_dir / "config"
+    aws_dir.mkdir(parents=True, exist_ok=True)
+    credentials_path.write_text(
+        "[default]\naws_access_key_id = AKIAEXAMPLE\naws_secret_access_key = secret\n"
+    )
+    config_path.write_text("[profile source]\nregion = us-west-2\n")
+
+    monkeypatch.setattr(login_module, "AWS_DOT_AWS_DIR", aws_dir)
+    monkeypatch.setattr(login_module, "AWS_CREDENTIALS_FILE", credentials_path)
+    monkeypatch.setattr(login_module, "AWS_CONFIG_FILE", config_path)
+    monkeypatch.setattr(login_module, "get_profile_region", lambda profile_name, session=None: "us-west-2")
+    monkeypatch.delenv("AWS_MFA_SERIAL", raising=False)
+    monkeypatch.setattr(
+        login_module.boto3,
+        "Session",
+        lambda profile_name: FakeSession(
+            FakeStsClient(
+                response={
+                    "Credentials": {
+                        "AccessKeyId": "ASIAWARN",
+                        "SecretAccessKey": "secret-key",
+                        "SessionToken": "session-token",
+                        "Expiration": "2030-01-01T00:00:00+00:00",
+                    }
+                }
+            )
+        ),
+    )
+
+    result = cli_runner.invoke(app, ["login", "--source-profile", "source", "--mfa-serial", ""])
+
+    assert result.exit_code == 0
+    assert "WARNING: Profile [default] exists but does not have a session token." in result.stdout
+    assert "Overwriting it with temporary STS tokens" in result.stdout
+
+
+def test_login_skips_config_sync_when_source_section_is_missing(tmp_path, monkeypatch):
+    login_module = importlib.import_module("aws_cli_tools.commands.login")
+
+    aws_dir = tmp_path / ".aws"
+    credentials_path = aws_dir / "credentials"
+    config_path = aws_dir / "config"
+
+    monkeypatch.setattr(login_module, "AWS_DOT_AWS_DIR", aws_dir)
+    monkeypatch.setattr(login_module, "AWS_CREDENTIALS_FILE", credentials_path)
+    monkeypatch.setattr(login_module, "AWS_CONFIG_FILE", config_path)
+    monkeypatch.setattr(login_module, "get_profile_region", lambda profile_name, session=None: "us-west-2")
+    monkeypatch.setattr(
+        login_module.boto3,
+        "Session",
+        lambda profile_name: FakeSession(
+            FakeStsClient(
+                response={
+                    "Credentials": {
+                        "AccessKeyId": "ASIANOCONFIG",
+                        "SecretAccessKey": "secret-key",
+                        "SessionToken": "session-token",
+                        "Expiration": "2030-01-01T00:00:00+00:00",
+                    }
+                }
+            )
+        ),
+    )
+
+    login_module.run_login(source_profile="missing")
+
+    assert credentials_path.exists()
+    assert not config_path.exists()
+
+
+def test_login_handles_unexpected_errors(tmp_path, monkeypatch, cli_runner):
+    login_module = importlib.import_module("aws_cli_tools.commands.login")
+
+    aws_dir = tmp_path / ".aws"
+    aws_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(login_module, "AWS_DOT_AWS_DIR", aws_dir)
+    monkeypatch.setattr(login_module, "AWS_CREDENTIALS_FILE", aws_dir / "credentials")
+    monkeypatch.setattr(login_module, "AWS_CONFIG_FILE", aws_dir / "config")
+    monkeypatch.setattr(login_module.boto3, "Session", lambda profile_name: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    result = cli_runner.invoke(app, ["login", "--source-profile", "source"])
+
+    assert result.exit_code == 1
+    assert "An error occurred: boom" in result.stderr

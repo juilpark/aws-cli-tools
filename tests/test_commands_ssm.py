@@ -203,3 +203,77 @@ def test_ssm_reauthenticates_once_when_browser_load_hits_request_expired(monkeyp
     assert run_ssm_browser.call_count == 2
     assert exec_calls[0][0] == "/usr/local/bin/aws"
     assert "Running login and retrying once" in result.stdout
+
+
+def test_is_request_expired_error_handles_wrapped_and_plain_errors():
+    ssm_module = importlib.import_module("aws_cli_tools.commands.ssm")
+
+    wrapped = ssm_module.AwsOperationError(
+        operation="ec2.describe_instances",
+        error=ClientError(
+            {
+                "Error": {"Code": "ExpiredTokenException", "Message": "expired"},
+                "ResponseMetadata": {"RequestId": "req-123", "HTTPStatusCode": 403},
+            },
+            "DescribeInstances",
+        ),
+        region="ap-northeast-2",
+        profile="default",
+    )
+
+    assert ssm_module.is_request_expired_error(wrapped) is True
+    assert ssm_module.is_request_expired_error(RuntimeError("Request has expired")) is True
+    assert ssm_module.is_request_expired_error(RuntimeError("different")) is False
+
+
+def test_run_ssm_browser_returns_selection_and_loading_error(monkeypatch, sample_match):
+    ssm_module = importlib.import_module("aws_cli_tools.commands.ssm")
+
+    class FakeBrowser:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.loading_error = RuntimeError("load failed")
+
+        def run(self):
+            return sample_match[0]
+
+    monkeypatch.setattr(ssm_module, "SsmSelectionApp", FakeBrowser)
+
+    match, error = ssm_module.run_ssm_browser(connect_timeout=3, read_timeout=4, max_attempts=5)
+
+    assert match == sample_match[0]
+    assert str(error) == "load failed"
+
+
+def test_ssm_browser_exit_without_selection_returns_nonzero(monkeypatch, cli_runner):
+    ssm_module = importlib.import_module("aws_cli_tools.commands.ssm")
+
+    monkeypatch.setattr(ssm_module.shutil, "which", lambda binary: "/usr/local/bin/aws")
+    monkeypatch.setattr(ssm_module, "run_ssm_browser", lambda **kwargs: (None, None))
+
+    result = cli_runner.invoke(app, ["ssm"])
+
+    assert result.exit_code == 1
+
+
+def test_ssm_prints_aws_error_after_retry_is_exhausted(monkeypatch, cli_runner):
+    ssm_module = importlib.import_module("aws_cli_tools.commands.ssm")
+
+    request_expired = ClientError(
+        {
+            "Error": {"Code": "RequestExpired", "Message": "Request has expired."},
+            "ResponseMetadata": {"RequestId": "req-123", "HTTPStatusCode": 400},
+        },
+        "DescribeRegions",
+    )
+    print_aws_error = Mock()
+
+    monkeypatch.setattr(ssm_module.shutil, "which", lambda binary: "/usr/local/bin/aws")
+    monkeypatch.setattr(ssm_module, "run_ssm_browser", lambda **kwargs: (None, request_expired))
+    monkeypatch.setattr(ssm_module, "run_login", Mock())
+    monkeypatch.setattr(ssm_module, "print_aws_error", print_aws_error)
+
+    result = cli_runner.invoke(app, ["ssm"])
+
+    assert result.exit_code == 1
+    print_aws_error.assert_called_once()

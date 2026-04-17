@@ -1,6 +1,10 @@
 import configparser
+from unittest.mock import Mock
+
+from botocore.exceptions import ClientError
 
 import aws_cli_tools.aws_common as aws_common_module
+from aws_cli_tools.errors import AwsOperationError
 from aws_cli_tools.constants import DEFAULT_STS_REGION
 
 
@@ -82,3 +86,39 @@ def test_get_profile_region_falls_back_to_default_region(
 
     assert aws_common_module.get_profile_region("missing") == DEFAULT_STS_REGION
 
+
+def test_get_default_session_uses_default_profile(monkeypatch):
+    session_factory = Mock(return_value="session")
+    monkeypatch.setattr(aws_common_module.boto3, "Session", session_factory)
+
+    assert aws_common_module.get_default_session() == "session"
+    session_factory.assert_called_once_with(profile_name="default")
+
+
+def test_get_enabled_regions_wraps_client_errors(monkeypatch):
+    class FakeClient:
+        def describe_regions(self, AllRegions=False):
+            raise ClientError(
+                {
+                    "Error": {"Code": "UnauthorizedOperation", "Message": "denied"},
+                    "ResponseMetadata": {"RequestId": "req-123", "HTTPStatusCode": 403},
+                },
+                "DescribeRegions",
+            )
+
+    class FakeSession:
+        def client(self, service_name, region_name=None, config=None):
+            assert service_name == "ec2"
+            assert region_name == "us-east-1"
+            return FakeClient()
+
+    monkeypatch.setattr(aws_common_module, "get_default_session", lambda: FakeSession())
+
+    try:
+        aws_common_module.get_enabled_regions()
+    except AwsOperationError as error:
+        assert error.operation == "ec2.describe_regions"
+        assert error.region == "us-east-1"
+        assert error.profile == "default"
+    else:
+        raise AssertionError("Expected get_enabled_regions to wrap the client error")
