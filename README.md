@@ -148,6 +148,7 @@ uv run aws-cli-tools resolve-instance my-app-web-01 --no-cache
 
 ```bash
 uv run aws-cli-tools ssm
+uv run aws-cli-tools ssm --no-cache
 uv run aws-cli-tools ssm i-0123456789abcdef0
 uv run aws-cli-tools ssm 10.0.0.15
 uv run aws-cli-tools ssm my-app-web-01
@@ -155,9 +156,10 @@ uv run aws-cli-tools ssm my-app-web-01
 
 이 명령은 두 가지 방식으로 동작합니다.
 
-- 인자를 생략하면: `Textual` 기반의 인터랙티브 테이블을 먼저 띄우고, 각 리전의 온라인 SSM 관리 대상 EC2 인스턴스가 조회되는 대로 목록이 계속 채워집니다.
+- 인자를 생략하면: `Textual` 기반의 인터랙티브 테이블을 먼저 띄우고, 최근 5분 이내의 리전별 SSM 대상 캐시가 있으면 먼저 보여준 뒤 각 리전의 온라인 SSM 관리 대상 EC2 인스턴스가 백그라운드에서 다시 조회되는 대로 목록을 최신 상태로 교체합니다.
 - 인자를 주면: 먼저 대상을 조회한 뒤, 단일 매치면 바로 접속하고 여러 개가 나오면 같은 테이블 UI에서 방향키로 하나를 고르게 합니다.
 - SSM 대상 로딩 중 자격 증명이 만료되어 `RequestExpired`가 발생하면, `login`을 한 번 자동 실행한 뒤 같은 흐름을 다시 시도합니다.
+- `--no-cache`를 주면: `resolve-instance` 캐시와 SSM 브라우저 캐시를 모두 무시하고 항상 새로 조회합니다.
 
 조작 방법:
 
@@ -209,6 +211,7 @@ uv run aws-cli-tools version
 `resolve-instance`는 아래 캐시 파일을 사용할 수 있습니다.
 
 - `~/.cache/aws-cli-tools/resolve-instance.json`
+- `~/.cache/aws-cli-tools/ssm-targets.json`
 
 ## 문제 해결
 
@@ -240,7 +243,7 @@ uv run python3 main.py --help
 
 ### 버전 정보
 
-현재 문서 기준 최신 애플리케이션 버전은 `0.2.1`입니다.
+현재 문서 기준 최신 애플리케이션 버전은 `0.3.0`입니다.
 
 ## 개발 메모
 

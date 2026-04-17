@@ -78,8 +78,44 @@ def test_ssm_without_target_uses_interactive_selector(monkeypatch, cli_runner, s
     result = cli_runner.invoke(app, ["ssm"])
 
     assert result.exit_code == 0
-    run_ssm_browser.assert_called_once()
+    run_ssm_browser.assert_called_once_with(
+        use_cached_results=True,
+        connect_timeout=3,
+        read_timeout=5,
+        max_attempts=1,
+    )
     assert exec_calls[0][0] == "/usr/local/bin/aws"
+
+
+def test_ssm_without_target_can_bypass_browser_cache(monkeypatch, cli_runner, sample_match):
+    ssm_module = importlib.import_module("aws_cli_tools.commands.ssm")
+
+    monkeypatch.setattr(ssm_module.shutil, "which", lambda binary: "/usr/local/bin/aws")
+    monkeypatch.setattr(ssm_module.console, "print", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ssm_module, "print_instance_matches", lambda matches: None)
+    monkeypatch.setattr(
+        ssm_module,
+        "build_ssm_command",
+        lambda match: ["aws", "ssm", "start-session", "--target", match["instance_id"], "--region", match["region"], "--profile", "default"],
+    )
+
+    run_ssm_browser = Mock(return_value=(sample_match[0], None))
+    monkeypatch.setattr(ssm_module, "run_ssm_browser", run_ssm_browser)
+
+    def fake_execv(path, argv):
+        raise typer.Exit(code=0)
+
+    monkeypatch.setattr(ssm_module.os, "execv", fake_execv)
+
+    result = cli_runner.invoke(app, ["ssm", "--no-cache"])
+
+    assert result.exit_code == 0
+    run_ssm_browser.assert_called_once_with(
+        use_cached_results=False,
+        connect_timeout=3,
+        read_timeout=5,
+        max_attempts=1,
+    )
 
 
 def test_ssm_uses_selector_for_ambiguous_matches(monkeypatch, cli_runner):
@@ -239,7 +275,12 @@ def test_run_ssm_browser_returns_selection_and_loading_error(monkeypatch, sample
 
     monkeypatch.setattr(ssm_module, "SsmSelectionApp", FakeBrowser)
 
-    match, error = ssm_module.run_ssm_browser(connect_timeout=3, read_timeout=4, max_attempts=5)
+    match, error = ssm_module.run_ssm_browser(
+        use_cached_results=False,
+        connect_timeout=3,
+        read_timeout=4,
+        max_attempts=5,
+    )
 
     assert match == sample_match[0]
     assert str(error) == "load failed"

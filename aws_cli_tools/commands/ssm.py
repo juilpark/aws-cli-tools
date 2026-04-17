@@ -29,6 +29,7 @@ def is_request_expired_error(error: Exception) -> bool:
 
 def run_ssm_browser(
     *,
+    use_cached_results: bool,
     connect_timeout: int,
     read_timeout: int,
     max_attempts: int,
@@ -38,6 +39,7 @@ def run_ssm_browser(
         title_text="AWS SSM Targets",
         status_text=f"Loading SSM targets with profile [{DEFAULT_PROFILE}]...",
         live_load=True,
+        use_cached_results=use_cached_results,
         connect_timeout=connect_timeout,
         read_timeout=read_timeout,
         max_attempts=max_attempts,
@@ -50,7 +52,7 @@ def ssm(
         None,
         help="EC2 instance id, IP address, or Name tag value to start an SSM session against. Leave empty to browse online SSM targets.",
     ),
-    no_cache: bool = typer.Option(False, "--no-cache", help="Bypass the local resolver cache"),
+    no_cache: bool = typer.Option(False, "--no-cache", help="Bypass local resolver and SSM browser caches"),
     connect_timeout: int = typer.Option(
         DEFAULT_CONNECT_TIMEOUT_SECONDS,
         "--connect-timeout",
@@ -88,6 +90,7 @@ def ssm(
             try:
                 if target is None:
                     match, loading_error = run_ssm_browser(
+                        use_cached_results=not no_cache,
                         connect_timeout=connect_timeout,
                         read_timeout=read_timeout,
                         max_attempts=max_attempts,

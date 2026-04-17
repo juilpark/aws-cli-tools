@@ -11,6 +11,7 @@ def isolated_cache_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(cache_module, "CACHE_DIR", cache_dir)
     monkeypatch.setattr(cache_module, "RESOLVE_CACHE_FILE", cache_dir / "resolve-instance.json")
     monkeypatch.setattr(cache_module, "REGION_FAILURE_CACHE_FILE", cache_dir / "region-failures.json")
+    monkeypatch.setattr(cache_module, "SSM_TARGETS_CACHE_FILE", cache_dir / "ssm-targets.json")
     return cache_dir
 
 

@@ -10,6 +10,8 @@ from .constants import (
     REGION_FAILURE_CACHE_FILE,
     REGION_FAILURE_CACHE_TTL_SECONDS,
     RESOLVE_CACHE_FILE,
+    SSM_TARGETS_CACHE_FILE,
+    SSM_TARGETS_CACHE_TTL_SECONDS,
 )
 from .models import InstanceMatch
 from .targets import is_instance_id
@@ -58,6 +60,16 @@ def save_region_failure_cache(cache_data: Dict[str, Any]) -> None:
     _save_json_cache(REGION_FAILURE_CACHE_FILE, cache_data)
 
 
+def load_ssm_targets_cache() -> Dict[str, Any]:
+    """Load the per-region SSM target cache from disk."""
+    return _load_json_cache(SSM_TARGETS_CACHE_FILE)
+
+
+def save_ssm_targets_cache(cache_data: Dict[str, Any]) -> None:
+    """Persist the per-region SSM target cache to disk."""
+    _save_json_cache(SSM_TARGETS_CACHE_FILE, cache_data)
+
+
 def get_region_failure_entry(region: str) -> Optional[Dict[str, Any]]:
     """Return a valid cached region failure entry when it is still fresh."""
     cache_data = load_region_failure_cache()
@@ -93,6 +105,42 @@ def cache_region_failure(
     save_region_failure_cache(cache_data)
 
 
+def get_cached_ssm_targets(region: str) -> Optional[List[InstanceMatch]]:
+    """Return cached SSM browser targets for a region when they are still fresh."""
+    cache_data = load_ssm_targets_cache()
+    entry = cache_data.get(region)
+    if not isinstance(entry, dict):
+        return None
+
+    expires_at = entry.get("expires_at")
+    matches = entry.get("matches")
+    if not isinstance(expires_at, (int, float)) or not isinstance(matches, list):
+        return None
+
+    if expires_at <= time.time():
+        cache_data.pop(region, None)
+        save_ssm_targets_cache(cache_data)
+        return None
+
+    return matches
+
+
+def cache_ssm_targets(
+    region: str,
+    matches: List[InstanceMatch],
+    ttl_seconds: int = SSM_TARGETS_CACHE_TTL_SECONDS,
+) -> None:
+    """Store SSM browser targets for a region."""
+    current_time = int(time.time())
+    cache_data = load_ssm_targets_cache()
+    cache_data[region] = {
+        "cached_at": current_time,
+        "expires_at": current_time + ttl_seconds,
+        "matches": matches,
+    }
+    save_ssm_targets_cache(cache_data)
+
+
 def get_cached_resolve_result(target: str) -> Optional[List[InstanceMatch]]:
     """Return a cached resolver result when it is still fresh."""
     cache_data = load_resolve_cache()
@@ -123,4 +171,3 @@ def cache_resolve_result(target: str, matches: List[InstanceMatch]) -> None:
         "matches": matches,
     }
     save_resolve_cache(cache_data)
-

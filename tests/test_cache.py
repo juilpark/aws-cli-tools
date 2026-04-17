@@ -56,6 +56,19 @@ def test_cache_region_failure_round_trips_active_entry(
     }
 
 
+def test_cache_ssm_targets_round_trips_active_entry(
+    isolated_cache_paths,
+    monkeypatch,
+    sample_match,
+):
+    monkeypatch.setattr(cache_module.time, "time", lambda: 3_000)
+
+    cache_module.cache_ssm_targets("ap-northeast-2", sample_match, ttl_seconds=120)
+
+    assert cache_module.get_cached_ssm_targets("ap-northeast-2") == sample_match
+    assert json.loads(cache_module.SSM_TARGETS_CACHE_FILE.read_text())["ap-northeast-2"]["matches"] == sample_match
+
+
 def test_get_region_failure_entry_drops_expired_entries(
     isolated_cache_paths,
     monkeypatch,
@@ -73,6 +86,26 @@ def test_get_region_failure_entry_drops_expired_entries(
 
     assert cache_module.get_region_failure_entry("ap-northeast-2") is None
     assert json.loads(cache_module.REGION_FAILURE_CACHE_FILE.read_text()) == {}
+
+
+def test_get_cached_ssm_targets_drops_expired_entries(
+    isolated_cache_paths,
+    monkeypatch,
+    sample_match,
+):
+    cache_module.save_ssm_targets_cache(
+        {
+            "ap-northeast-2": {
+                "cached_at": 1,
+                "expires_at": 2,
+                "matches": sample_match,
+            }
+        }
+    )
+    monkeypatch.setattr(cache_module.time, "time", lambda: 3)
+
+    assert cache_module.get_cached_ssm_targets("ap-northeast-2") is None
+    assert json.loads(cache_module.SSM_TARGETS_CACHE_FILE.read_text()) == {}
 
 
 def test_load_resolve_cache_returns_empty_for_invalid_json(isolated_cache_paths):
@@ -108,3 +141,17 @@ def test_get_region_failure_entry_rejects_invalid_entry_shape(isolated_cache_pat
     )
 
     assert cache_module.get_region_failure_entry("ap-northeast-2") is None
+
+
+def test_get_cached_ssm_targets_rejects_invalid_entry_shape(isolated_cache_paths):
+    cache_module.save_ssm_targets_cache(
+        {
+            "ap-northeast-2": {
+                "cached_at": 1,
+                "expires_at": "tomorrow",
+                "matches": "not-a-list",
+            }
+        }
+    )
+
+    assert cache_module.get_cached_ssm_targets("ap-northeast-2") is None
