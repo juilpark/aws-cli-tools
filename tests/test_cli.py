@@ -24,6 +24,7 @@ def test_root_help_lists_available_commands():
     assert "region-loop" in result.stdout
     assert "resolve-instance" in result.stdout
     assert "ssm" in result.stdout
+    assert "ssm-targets" in result.stdout
     assert "version" in result.stdout
 
 

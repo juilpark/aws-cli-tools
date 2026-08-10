@@ -1,3 +1,5 @@
+import csv
+import io
 from typing import List, Optional
 
 import typer
@@ -54,16 +56,30 @@ def print_instance_matches(matches: List[InstanceMatch]) -> None:
     table.add_column("State")
 
     for match in matches:
-        table.add_row(
-            match["region"],
-            match.get("name") or "-",
-            match["instance_id"],
-            match.get("private_ip") or "-",
-            match.get("public_ip") or "-",
-            match.get("state") or "unknown",
-        )
+        table.add_row(*_instance_match_display_values(match))
 
     console.print(table)
+
+
+def _instance_match_display_values(match: InstanceMatch) -> tuple[str, str, str, str, str, str]:
+    return (
+        match["region"],
+        match.get("name") or "-",
+        match["instance_id"],
+        match.get("private_ip") or "-",
+        match.get("public_ip") or "-",
+        match.get("state") or "unknown",
+    )
+
+
+def print_instance_matches_csv(matches: List[InstanceMatch]) -> None:
+    """Print instance matches as CSV for terminal piping."""
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(["region", "name", "instance_id", "private_ip", "public_ip", "state"])
+    for match in matches:
+        writer.writerow(_instance_match_display_values(match))
+    typer.echo(buffer.getvalue(), nl=False)
 
 
 def print_regions_list(regions: List[str], cols: int = 4) -> None:

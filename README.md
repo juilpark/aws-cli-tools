@@ -1,7 +1,7 @@
 # aws-cli-tools
 
 `aws-cli-tools`는 AWS 계정 작업을 조금 더 빠르게 처리하기 위한 작은 Python CLI 도구입니다.  
-현재는 임시 세션 토큰 발급, 여러 리전 반복 실행, EC2 인스턴스 조회, SSM 세션 시작 기능을 제공합니다.
+현재는 임시 세션 토큰 발급, 여러 리전 반복 실행, EC2 인스턴스 조회, SSM 세션 시작, SSM 대상 CSV 출력 기능을 제공합니다.
 
 ## 무엇을 할 수 있나요?
 
@@ -9,6 +9,7 @@
 - `region-loop`: 입력한 `aws ...` 명령을 모든 AWS 리전에 반복 실행합니다.
 - `resolve-instance`: 인스턴스 ID, IP, Name 태그로 EC2 인스턴스를 찾아 리전과 메타데이터를 출력합니다.
 - `ssm`: 대상을 찾아 해당 인스턴스로 AWS SSM 세션을 시작합니다.
+- `ssm-targets`: `ssm` 브라우저에 보이는 온라인 SSM 대상 목록을 CSV로 출력합니다.
 - `version`: 현재 버전을 출력합니다.
 
 ## 준비 사항
@@ -179,7 +180,28 @@ aws ssm start-session --target <instance-id> --region <region> --profile default
 - 대상 인스턴스가 SSM 접속 가능한 상태여야 합니다.
 - 현재 구현은 항상 `default` 프로필로 SSM 세션을 시작합니다.
 
-### 6. 버전 확인
+### 6. SSM 대상 목록을 CSV로 보기
+
+```bash
+uv run aws-cli-tools ssm-targets
+uv run aws-cli-tools ssm-targets --no-cache
+```
+
+이 명령은 `ssm`에서 인터랙티브 브라우저가 보여주는 것과 같은 온라인 SSM 관리 대상 EC2 목록을 CSV로 터미널에 출력합니다.
+
+- 기본적으로 최근 5분 이내의 리전별 SSM 대상 캐시를 먼저 사용합니다.
+- `--no-cache`를 주면 SSM 브라우저 캐시를 무시하고 항상 새로 조회합니다.
+- 자격 증명이 만료되어 `RequestExpired`가 발생하면 `login`을 한 번 자동 실행한 뒤 다시 시도합니다.
+- 출력 컬럼은 `region,name,instance_id,private_ip,public_ip,state` 순서입니다.
+
+예시 출력:
+
+```csv
+region,name,instance_id,private_ip,public_ip,state
+ap-northeast-2,example-instance,i-0123456789abcdef0,10.0.0.12,-,running
+```
+
+### 7. 버전 확인
 
 ```bash
 uv run aws-cli-tools version
@@ -196,6 +218,7 @@ uv run aws-cli-tools login --help
 uv run aws-cli-tools region-loop --help
 uv run aws-cli-tools resolve-instance --help
 uv run aws-cli-tools ssm --help
+uv run aws-cli-tools ssm-targets --help
 uv run aws-cli-tools version
 ```
 
@@ -243,7 +266,7 @@ uv run python3 main.py --help
 
 ### 버전 정보
 
-현재 문서 기준 최신 애플리케이션 버전은 `0.3.0`입니다.
+현재 문서 기준 최신 애플리케이션 버전은 `0.4.0`입니다.
 
 ## 개발 메모
 

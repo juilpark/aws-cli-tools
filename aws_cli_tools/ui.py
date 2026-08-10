@@ -1,6 +1,4 @@
 import re
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional
 
 from rich.text import Text
@@ -11,12 +9,9 @@ from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import DataTable, Footer, Header, Input, Static
 
-from .aws_common import get_enabled_regions
-from .cache import cache_region_failure, cache_ssm_targets, get_cached_ssm_targets, get_region_failure_entry
 from .constants import DEFAULT_CONNECT_TIMEOUT_SECONDS, DEFAULT_MAX_ATTEMPTS, DEFAULT_READ_TIMEOUT_SECONDS
-from .errors import AwsOperationError, is_skippable_region_error
 from .models import InstanceMatch
-from .ssm_targets import list_ssm_candidates_in_region
+from .ssm_target_loader import load_ssm_target_candidates
 
 
 class SsmSelectionApp(App[Optional[InstanceMatch]]):
@@ -164,66 +159,19 @@ class SsmSelectionApp(App[Optional[InstanceMatch]]):
 
     def load_candidates(self) -> None:
         try:
-            regions = get_enabled_regions()
+            load_ssm_target_candidates(
+                use_cached_results=self.use_cached_results,
+                connect_timeout=self.connect_timeout,
+                read_timeout=self.read_timeout,
+                max_attempts=self.max_attempts,
+                on_loading_started=lambda total_regions: self.post_message(self.LoadingStarted(total_regions)),
+                on_region_cached=lambda region, matches: self.post_message(self.RegionCached(region, matches)),
+                on_region_loaded=lambda region, matches: self.post_message(self.RegionLoaded(region, matches)),
+                on_region_skipped=lambda region, detail: self.post_message(self.RegionSkipped(region, detail)),
+                on_loading_finished=lambda: self.post_message(self.LoadingFinished()),
+            )
         except Exception as error:
             self.post_message(self.LoadingFailed(error))
-            return
-
-        self.post_message(self.LoadingStarted(len(regions)))
-
-        if self.use_cached_results:
-            for region in regions:
-                matches = get_cached_ssm_targets(region)
-                if matches is not None:
-                    self.post_message(self.RegionCached(region, matches))
-
-        active_regions: List[str] = []
-        for region in regions:
-            failure_entry = get_region_failure_entry(region)
-            if failure_entry is not None:
-                expires_at = int(failure_entry["expires_at"])
-                remaining_seconds = max(0, expires_at - int(time.time()))
-                self.post_message(
-                    self.RegionSkipped(
-                        region,
-                        f"cached failure for {remaining_seconds}s more: {failure_entry.get('error', 'unknown error')}",
-                    )
-                )
-                continue
-            active_regions.append(region)
-
-        max_workers = min(12, len(active_regions)) or 1
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_region = {
-                executor.submit(
-                    list_ssm_candidates_in_region,
-                    region,
-                    self.connect_timeout,
-                    self.read_timeout,
-                    self.max_attempts,
-                ): region
-                for region in active_regions
-            }
-
-            for future in as_completed(future_to_region):
-                region = future_to_region[future]
-                try:
-                    matches = future.result()
-                except AwsOperationError as error:
-                    if is_skippable_region_error(error):
-                        cache_region_failure(region, error.error)
-                        self.post_message(self.RegionSkipped(region, f"network timeout/error: {error.error}"))
-                        continue
-                    self.post_message(self.LoadingFailed(error))
-                    return
-                except Exception as error:
-                    self.post_message(self.LoadingFailed(error))
-                    return
-
-                cache_ssm_targets(region, matches)
-                self.post_message(self.RegionLoaded(region, matches))
-
-        self.post_message(self.LoadingFinished())
 
     @staticmethod
     def get_row_key(match: InstanceMatch) -> str:

@@ -59,6 +59,32 @@ def test_print_regions_list_outputs_grid_rows(monkeypatch):
     ]
 
 
+def test_print_instance_matches_csv_outputs_header_and_rows(monkeypatch):
+    rows = []
+    monkeypatch.setattr(output_module.typer, "echo", lambda value, nl=True: rows.append((value, nl)))
+
+    output_module.print_instance_matches_csv(
+        [
+            {
+                "region": "ap-northeast-2",
+                "instance_id": "i-0123456789abcdef0",
+                "private_ip": None,
+                "public_ip": None,
+                "state": None,
+                "name": None,
+            }
+        ]
+    )
+
+    assert rows == [
+        (
+            "region,name,instance_id,private_ip,public_ip,state\n"
+            "ap-northeast-2,-,i-0123456789abcdef0,-,-,unknown\n",
+            False,
+        )
+    ]
+
+
 def test_print_aws_error_includes_context_and_auth_hint(monkeypatch):
     secho = Mock()
     echo = Mock()

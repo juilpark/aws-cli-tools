@@ -9,22 +9,13 @@ from rich.panel import Panel
 
 from ..cache import cache_resolve_result, get_cached_resolve_result
 from ..constants import DEFAULT_CONNECT_TIMEOUT_SECONDS, DEFAULT_MAX_ATTEMPTS, DEFAULT_PROFILE, DEFAULT_READ_TIMEOUT_SECONDS
-from ..errors import AwsOperationError
+from ..errors import AwsOperationError, is_request_expired_error
 from ..instances import resolve_instance_matches
 from ..models import InstanceMatch
 from ..output import console, print_aws_error, print_instance_matches
 from ..ssm_targets import build_ssm_command
 from ..ui import SsmSelectionApp
 from .login import run_login
-
-
-def is_request_expired_error(error: Exception) -> bool:
-    """Return True when the underlying AWS error indicates expired credentials."""
-    original_error = error.error if isinstance(error, AwsOperationError) else error
-    if isinstance(original_error, ClientError):
-        error_code = original_error.response.get("Error", {}).get("Code")
-        return error_code in {"RequestExpired", "ExpiredToken", "ExpiredTokenException"}
-    return "Request has expired" in str(original_error)
 
 
 def run_ssm_browser(
