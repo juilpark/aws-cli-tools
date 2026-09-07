@@ -68,3 +68,59 @@ class ReservedInstanceInventory(TypedDict):
     recurring_charge_frequency: Optional[str]
     recurring_charges_json: str
     tags_json: str
+
+
+class SavingsPlanInventory(TypedDict):
+    captured_at_utc: Optional[str]
+    savings_plan_id: Optional[str]
+    savings_plan_arn: Optional[str]
+    state: Optional[str]
+    savings_plan_type: Optional[str]
+    region: Optional[str]
+    ec2_instance_family: Optional[str]
+    product_types: Optional[str]
+    payment_option: Optional[str]
+    currency: Optional[str]
+    commitment: Optional[str]
+    upfront_payment_amount: Optional[str]
+    recurring_payment_amount: Optional[str]
+    term_duration_seconds: Optional[int]
+    start: Optional[str]
+    end: Optional[str]
+    returnable_until: Optional[str]
+    offering_id: Optional[str]
+    description: Optional[str]
+    tags_json: str
+
+
+class CommitmentEligibility(TypedDict):
+    captured_at_utc: Optional[str]
+    service: str
+    service_code: str
+    resource_type: str
+    region_scope: str
+    commitment_types: str
+    inventory_status: str
+    api_operations: str
+    notes: str
+
+
+class CommitmentResourceInventory(TypedDict):
+    captured_at_utc: Optional[str]
+    service: str
+    service_code: str
+    resource_type: str
+    resource_id: Optional[str]
+    resource_name: Optional[str]
+    region: str
+    state: Optional[str]
+    engine: Optional[str]
+    instance_type: Optional[str]
+    instance_count: Optional[int]
+    capacity_summary: Optional[str]
+    commitment_types: str
+    collection_status: str
+    eligibility_note: Optional[str]
+    error_code: Optional[str]
+    error_message: Optional[str]
+    details_json: str

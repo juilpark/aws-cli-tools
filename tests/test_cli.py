@@ -26,7 +26,9 @@ def test_root_help_lists_available_commands():
     assert "ssm" in result.stdout
     assert "ssm-targets" in result.stdout
     assert "ec2-inventory" in result.stdout
+    assert "commitment-inventory" in result.stdout
     assert "ri-inventory" in result.stdout
+    assert "sp-inventory" in result.stdout
     assert "version" in result.stdout
 
 

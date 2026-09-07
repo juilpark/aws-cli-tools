@@ -9,7 +9,9 @@
 - `region-loop`: 입력한 `aws ...` 명령을 모든 AWS 리전에 반복 실행합니다.
 - `resolve-instance`: 인스턴스 ID, IP, Name 태그로 EC2 인스턴스를 찾아 리전과 메타데이터를 출력합니다.
 - `ec2-inventory`: 활성화된 모든 리전의 EC2 인스턴스를 조회해 RI/SP 검토용 CSV를 `~/Downloads/` 하위에 저장합니다.
+- `commitment-inventory`: RI/Savings Plans 적용 대상 서비스 유형과 실제 리전별 리소스를 CSV로 저장합니다.
 - `ri-inventory`: 활성화된 모든 리전의 EC2 Reserved Instance 약정을 조회해 CSV로 저장합니다.
+- `sp-inventory`: 계정의 Savings Plan 계약 현황을 조회해 적용 리전과 함께 CSV로 저장합니다.
 - `ssm`: 대상을 찾아 해당 인스턴스로 AWS SSM 세션을 시작합니다.
 - `ssm-targets`: `ssm` 브라우저에 보이는 온라인 SSM 대상 목록을 CSV로 출력합니다.
 - `version`: 현재 버전을 출력합니다.
@@ -256,7 +258,57 @@ CSV에는 리전, RI ID, 인스턴스 타입/수량, 상태, scope, Availability
 
 한 리전이라도 조회에 실패하면 불완전한 CSV를 저장하지 않습니다. 이 파일은 현재 보유 약정의 현황 원본이며, 새 RI 구매 수량은 EC2 사용량·기존 RI 적용률·SP 사용량과 함께 판단해야 합니다.
 
-### 9. 버전 확인
+### 9. Savings Plan 계약 CSV 저장
+
+```bash
+uv run aws-cli-tools sp-inventory
+```
+
+이 명령은 Savings Plans API에서 계정의 계약 목록을 조회하고 아래 위치에 실행 시각이 붙은 CSV를 생성합니다.
+
+```text
+~/Downloads/aws-cli-tools/sp-inventory/sp-commitments-<UTC timestamp>.csv
+```
+
+저장 폴더를 직접 지정할 수도 있습니다.
+
+```bash
+uv run aws-cli-tools sp-inventory \
+  --output-dir ~/Downloads/ri-sp-review
+```
+
+CSV에는 Savings Plan ID/ARN, `state`, Savings Plan 유형, 적용 대상 `region`, EC2 인스턴스 패밀리, 상품 유형, 결제 옵션, 통화, 시간당 약정 금액, 선불/반복 결제 금액, 약정 기간, 시작/종료/반환 가능 시각, 설명과 태그가 포함됩니다. 금액은 AWS API가 반환한 문자열을 그대로 저장해 정밀도를 보존합니다.
+
+Savings Plans 계약 조회는 EC2 활성화 리전을 하나씩 호출하지 않고 계정 단위 API에서 한 번에 수행합니다. 따라서 CSV의 `region`은 각 계약에 포함된 적용 대상 리전이며, Compute Savings Plan처럼 특정 리전에 한정되지 않는 계약은 AWS가 반환하는 값이 비어 있을 수 있습니다.
+
+`state`는 현재 계약 상태를 보여주는 원본 값입니다. 신규 RI/SP 구매 판단에는 이 CSV만 사용하지 말고 Cost Explorer의 Savings Plans 사용률·커버리지·추천 결과와 실제 On-Demand 사용량을 함께 확인하세요.
+
+### 10. RI/SP 적용 대상 리소스와 서비스 유형 CSV 저장
+
+```bash
+uv run aws-cli-tools commitment-inventory
+```
+
+이 명령은 AWS 공식 적용 범위를 기준으로 다음 두 개의 CSV를 생성합니다.
+
+```text
+~/Downloads/aws-cli-tools/commitment-inventory/commitment-eligibility-<UTC timestamp>.csv
+~/Downloads/aws-cli-tools/commitment-inventory/commitment-resources-<UTC timestamp>.csv
+```
+
+`commitment-eligibility`에는 다음 유형이 포함됩니다.
+
+- Compute Savings Plan: EC2, ECS/EKS Fargate, Lambda
+- EC2 Instance Savings Plan: EC2
+- SageMaker AI Savings Plan: SageMaker AI
+- Database Savings Plan: RDS/Aurora, Aurora DSQL, DynamoDB, ElastiCache for Valkey, DocumentDB, Timestream, Neptune/Neptune Analytics, Keyspaces, DMS, OpenSearch managed domains/Serverless
+- Reserved Instance/Node/Capacity: EC2, RDS, ElastiCache, OpenSearch, Redshift, MemoryDB, DynamoDB
+
+`commitment-resources`에는 각 활성화 리전의 실제 리소스와 인스턴스 타입, 노드 수, 용량, 상태, 적용 가능한 약정 유형이 포함됩니다. API 권한이 없거나 해당 리전에서 서비스를 사용할 수 없는 경우에도 `collection_status`, `error_code`, `error_message` 행을 남겨 누락 원인을 확인할 수 있습니다.
+
+Savings Plans는 실제 사용량에 적용되는 약정이므로 Lambda 함수, Fargate 프로파일/태스크, SageMaker 리소스 목록만으로 구매 수량을 결정할 수 없습니다. Spot/Fargate Spot 사용량은 대상에서 제외하고, 최종 구매 판단은 Cost Explorer의 RI/SP 사용률·커버리지·구매 추천 및 CUR 사용량과 함께 검토하세요. 자세한 적용 범위는 [Savings Plans types](https://docs.aws.amazon.com/savingsplans/latest/userguide/plan-types.html), [Database Savings Plans pricing](https://aws.amazon.com/savingsplans/database-pricing/), [RI recommendations](https://docs.aws.amazon.com/cost-management/latest/userguide/ri-recommendations.html)를 참고하세요.
+
+### 11. 버전 확인
 
 ```bash
 uv run aws-cli-tools version
@@ -272,10 +324,12 @@ uv run aws-cli-tools --help
 uv run aws-cli-tools login --help
 uv run aws-cli-tools region-loop --help
 uv run aws-cli-tools resolve-instance --help
+uv run aws-cli-tools commitment-inventory --help
 uv run aws-cli-tools ssm --help
 uv run aws-cli-tools ssm-targets --help
 uv run aws-cli-tools ec2-inventory --help
 uv run aws-cli-tools ri-inventory --help
+uv run aws-cli-tools sp-inventory --help
 uv run aws-cli-tools version
 ```
 
@@ -300,6 +354,14 @@ uv run aws-cli-tools version
 `ri-inventory`는 아래 폴더에 CSV 파일을 생성합니다.
 
 - `~/Downloads/aws-cli-tools/ri-inventory/`
+
+`sp-inventory`는 아래 폴더에 CSV 파일을 생성합니다.
+
+- `~/Downloads/aws-cli-tools/sp-inventory/`
+
+`commitment-inventory`는 아래 폴더에 적용 범위와 리소스 CSV를 생성합니다.
+
+- `~/Downloads/aws-cli-tools/commitment-inventory/`
 
 ## 문제 해결
 
@@ -331,7 +393,7 @@ uv run python3 main.py --help
 
 ### 버전 정보
 
-현재 문서 기준 최신 애플리케이션 버전은 `0.6.0`입니다.
+현재 문서 기준 최신 애플리케이션 버전은 `0.8.0`입니다.
 
 ## 개발 메모
 
