@@ -78,7 +78,12 @@ def test_resolve_instance_exits_when_no_match_is_found(monkeypatch, cli_runner):
     assert "No instance found for [missing-instance]." in result.stderr
 
 
-def test_resolve_instance_bypasses_cache_when_no_cache_option_is_set(monkeypatch, cli_runner, sample_match):
+def test_resolve_instance_bypasses_cache_when_no_cache_option_is_set(
+    monkeypatch,
+    cli_runner,
+    sample_match,
+    isolated_cache_paths,
+):
     resolve_instance_module = importlib.import_module("aws_cli_tools.commands.resolve_instance")
 
     get_cached_resolve_result = Mock(return_value=sample_match)

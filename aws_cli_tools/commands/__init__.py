@@ -1,8 +1,19 @@
+from .ec2_inventory import ec2_inventory
 from .login import login
 from .region_loop import region_loop
+from .ri_inventory import ri_inventory
 from .resolve_instance import resolve_instance
 from .ssm import ssm
 from .ssm_targets import ssm_targets
 from .version import version
 
-__all__ = ["login", "region_loop", "resolve_instance", "ssm", "ssm_targets", "version"]
+__all__ = [
+    "ec2_inventory",
+    "login",
+    "region_loop",
+    "resolve_instance",
+    "ri_inventory",
+    "ssm",
+    "ssm_targets",
+    "version",
+]

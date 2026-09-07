@@ -25,6 +25,8 @@ def test_root_help_lists_available_commands():
     assert "resolve-instance" in result.stdout
     assert "ssm" in result.stdout
     assert "ssm-targets" in result.stdout
+    assert "ec2-inventory" in result.stdout
+    assert "ri-inventory" in result.stdout
     assert "version" in result.stdout
 
 

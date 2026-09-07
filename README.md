@@ -1,13 +1,15 @@
 # aws-cli-tools
 
 `aws-cli-tools`는 AWS 계정 작업을 조금 더 빠르게 처리하기 위한 작은 Python CLI 도구입니다.  
-현재는 임시 세션 토큰 발급, 여러 리전 반복 실행, EC2 인스턴스 조회, SSM 세션 시작, SSM 대상 CSV 출력 기능을 제공합니다.
+현재는 임시 세션 토큰 발급, 여러 리전 반복 실행, EC2 인스턴스 조회 및 RI/SP 검토용 CSV 내보내기, SSM 세션 시작, SSM 대상 CSV 출력 기능을 제공합니다.
 
 ## 무엇을 할 수 있나요?
 
 - `login`: STS 임시 세션 토큰을 받아 `~/.aws/credentials`와 `~/.aws/config`를 갱신합니다.
 - `region-loop`: 입력한 `aws ...` 명령을 모든 AWS 리전에 반복 실행합니다.
 - `resolve-instance`: 인스턴스 ID, IP, Name 태그로 EC2 인스턴스를 찾아 리전과 메타데이터를 출력합니다.
+- `ec2-inventory`: 활성화된 모든 리전의 EC2 인스턴스를 조회해 RI/SP 검토용 CSV를 `~/Downloads/` 하위에 저장합니다.
+- `ri-inventory`: 활성화된 모든 리전의 EC2 Reserved Instance 약정을 조회해 CSV로 저장합니다.
 - `ssm`: 대상을 찾아 해당 인스턴스로 AWS SSM 세션을 시작합니다.
 - `ssm-targets`: `ssm` 브라우저에 보이는 온라인 SSM 대상 목록을 CSV로 출력합니다.
 - `version`: 현재 버전을 출력합니다.
@@ -201,7 +203,60 @@ region,name,instance_id,private_ip,public_ip,state
 ap-northeast-2,example-instance,i-0123456789abcdef0,10.0.0.12,-,running
 ```
 
-### 7. 버전 확인
+### 7. RI/SP 검토용 EC2 인벤토리 CSV 저장
+
+```bash
+uv run aws-cli-tools ec2-inventory
+```
+
+이 명령은 기본 프로필로 계정에서 활성화된 모든 리전의 EC2 인스턴스를 읽고, 아래 위치에 실행 시각이 붙은 CSV 파일을 생성합니다.
+
+```text
+~/Downloads/aws-cli-tools/ec2-inventory/ec2-instances-<UTC timestamp>.csv
+```
+
+저장 폴더를 직접 지정할 수도 있습니다.
+
+```bash
+uv run aws-cli-tools ec2-inventory --output-dir ~/Downloads/ri-sp-review
+```
+
+CSV에는 다음과 같은 구매 검토용 정보가 포함됩니다.
+
+- 리전, Availability Zone, 인스턴스 ID, Name 태그
+- AMI, 인스턴스 타입, 상태, 플랫폼/플랫폼 상세, 아키텍처, 테넌시
+- Spot 여부, 시작 시각, Usage Operation, vCPU 코어/스레드 정보
+- 하이퍼바이저, 가상화 방식, EBS 최적화 여부, VPC/Subnet/IP
+- 예약 ID, 계정 소유자 ID, 전체 태그 JSON
+
+한 리전이라도 조회에 실패하면 불완전한 CSV를 저장하지 않습니다. 연결이 불안정한 경우 `--connect-timeout`, `--read-timeout`, `--max-attempts` 옵션을 조정할 수 있습니다.
+
+이 파일은 현재 EC2 인벤토리 원본입니다. RI/SP 구매 수량과 금액은 실제 On-Demand 사용량, 기존 RI/SP 적용 여부, 사용률과 함께 Cost Explorer 또는 CUR에서 추가로 확인해야 합니다. 특히 Spot 사용량은 Savings Plans 적용 대상이 아니므로 `spot_instance` 컬럼을 별도로 확인하세요.
+
+### 8. 기존 RI 약정 CSV 저장
+
+```bash
+uv run aws-cli-tools ri-inventory
+```
+
+이 명령은 기본 프로필로 모든 활성화 리전의 EC2 Reserved Instance 약정을 조회하고 아래 위치에 실행 시각이 붙은 CSV를 생성합니다.
+
+```text
+~/Downloads/aws-cli-tools/ri-inventory/ri-commitments-<UTC timestamp>.csv
+```
+
+저장 폴더를 직접 지정할 수도 있습니다.
+
+```bash
+uv run aws-cli-tools ri-inventory \
+  --output-dir ~/Downloads/ri-sp-review
+```
+
+CSV에는 리전, RI ID, 인스턴스 타입/수량, 상태, scope, Availability Zone, 테넌시, 플랫폼, Standard/Convertible, 결제 방식, 약정 기간, 시작/종료 시각, 고정 가격, 시간당 사용 가격, 반복 비용, 태그가 포함됩니다. `state` 컬럼으로 `active`, `payment-pending`, `payment-failed`, `retired` 등 AWS 상태를 구분할 수 있습니다.
+
+한 리전이라도 조회에 실패하면 불완전한 CSV를 저장하지 않습니다. 이 파일은 현재 보유 약정의 현황 원본이며, 새 RI 구매 수량은 EC2 사용량·기존 RI 적용률·SP 사용량과 함께 판단해야 합니다.
+
+### 9. 버전 확인
 
 ```bash
 uv run aws-cli-tools version
@@ -219,6 +274,8 @@ uv run aws-cli-tools region-loop --help
 uv run aws-cli-tools resolve-instance --help
 uv run aws-cli-tools ssm --help
 uv run aws-cli-tools ssm-targets --help
+uv run aws-cli-tools ec2-inventory --help
+uv run aws-cli-tools ri-inventory --help
 uv run aws-cli-tools version
 ```
 
@@ -235,6 +292,14 @@ uv run aws-cli-tools version
 
 - `~/.cache/aws-cli-tools/resolve-instance.json`
 - `~/.cache/aws-cli-tools/ssm-targets.json`
+
+`ec2-inventory`는 아래 폴더에 CSV 파일을 생성합니다.
+
+- `~/Downloads/aws-cli-tools/ec2-inventory/`
+
+`ri-inventory`는 아래 폴더에 CSV 파일을 생성합니다.
+
+- `~/Downloads/aws-cli-tools/ri-inventory/`
 
 ## 문제 해결
 
@@ -266,7 +331,7 @@ uv run python3 main.py --help
 
 ### 버전 정보
 
-현재 문서 기준 최신 애플리케이션 버전은 `0.4.0`입니다.
+현재 문서 기준 최신 애플리케이션 버전은 `0.6.0`입니다.
 
 ## 개발 메모
 

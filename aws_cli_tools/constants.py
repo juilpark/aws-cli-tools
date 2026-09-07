@@ -1,7 +1,7 @@
 from pathlib import Path
 
 APP_NAME = "aws-cli-tools"
-VERSION = "0.4.0"
+VERSION = "0.6.0"
 
 AWS_DOT_AWS_DIR = Path.home() / ".aws"
 AWS_CREDENTIALS_FILE = AWS_DOT_AWS_DIR / "credentials"
@@ -14,6 +14,8 @@ CACHE_DIR = Path.home() / ".cache" / APP_NAME
 RESOLVE_CACHE_FILE = CACHE_DIR / "resolve-instance.json"
 REGION_FAILURE_CACHE_FILE = CACHE_DIR / "region-failures.json"
 SSM_TARGETS_CACHE_FILE = CACHE_DIR / "ssm-targets.json"
+EC2_INVENTORY_OUTPUT_DIR = Path.home() / "Downloads" / APP_NAME / "ec2-inventory"
+RI_INVENTORY_OUTPUT_DIR = Path.home() / "Downloads" / APP_NAME / "ri-inventory"
 
 INSTANCE_ID_CACHE_TTL_SECONDS = 300
 IP_CACHE_TTL_SECONDS = 60
