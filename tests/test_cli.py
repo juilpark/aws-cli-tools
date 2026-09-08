@@ -25,11 +25,22 @@ def test_root_help_lists_available_commands():
     assert "resolve-instance" in result.stdout
     assert "ssm" in result.stdout
     assert "ssm-targets" in result.stdout
-    assert "ec2-inventory" in result.stdout
-    assert "commitment-inventory" in result.stdout
-    assert "ri-inventory" in result.stdout
-    assert "sp-inventory" in result.stdout
+    assert "inventory" in result.stdout
+    assert "ec2-inventory" not in result.stdout
+    assert "commitment-inventory" not in result.stdout
+    assert "ri-inventory" not in result.stdout
+    assert "sp-inventory" not in result.stdout
     assert "version" in result.stdout
+
+
+def test_inventory_help_lists_inventory_subcommands():
+    result = runner.invoke(app, ["inventory", "--help"])
+
+    assert result.exit_code == 0
+    assert "ec2" in result.stdout
+    assert "commitment" in result.stdout
+    assert "ri" in result.stdout
+    assert "sp" in result.stdout
 
 
 def test_compatibility_entrypoint_version_function_prints_current_version(monkeypatch):

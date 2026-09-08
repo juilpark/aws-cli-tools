@@ -18,7 +18,8 @@ def test_ec2_inventory_writes_csv_to_requested_directory(monkeypatch, cli_runner
     result = cli_runner.invoke(
         app,
         [
-            "ec2-inventory",
+            "inventory",
+            "ec2",
             "--output-dir",
             str(tmp_path),
             "--connect-timeout",
@@ -49,7 +50,7 @@ def test_ec2_inventory_prints_aws_error_and_does_not_write_file(monkeypatch, cli
     print_aws_error = Mock()
     monkeypatch.setattr(command_module, "print_aws_error", print_aws_error)
 
-    result = cli_runner.invoke(app, ["ec2-inventory"])
+    result = cli_runner.invoke(app, ["inventory", "ec2"])
 
     assert result.exit_code == 1
     print_aws_error.assert_called_once_with(error)

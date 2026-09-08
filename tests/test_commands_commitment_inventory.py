@@ -24,7 +24,8 @@ def test_commitment_inventory_writes_eligibility_and_resource_csvs(monkeypatch, 
     result = cli_runner.invoke(
         app,
         [
-            "commitment-inventory",
+            "inventory",
+            "commitment",
             "--output-dir",
             str(tmp_path),
             "--connect-timeout",
@@ -60,7 +61,7 @@ def test_commitment_inventory_prints_aws_error_and_exits(monkeypatch, cli_runner
     print_aws_error = Mock()
     monkeypatch.setattr(command_module, "print_aws_error", print_aws_error)
 
-    result = cli_runner.invoke(app, ["commitment-inventory"])
+    result = cli_runner.invoke(app, ["inventory", "commitment"])
 
     assert result.exit_code == 1
     print_aws_error.assert_called_once_with(error)

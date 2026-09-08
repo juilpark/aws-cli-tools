@@ -18,7 +18,8 @@ def test_ri_inventory_writes_csv_to_requested_directory(monkeypatch, cli_runner,
     result = cli_runner.invoke(
         app,
         [
-            "ri-inventory",
+            "inventory",
+            "ri",
             "--output-dir",
             str(tmp_path),
             "--connect-timeout",
@@ -49,7 +50,7 @@ def test_ri_inventory_prints_aws_error_and_does_not_write_file(monkeypatch, cli_
     print_aws_error = Mock()
     monkeypatch.setattr(command_module, "print_aws_error", print_aws_error)
 
-    result = cli_runner.invoke(app, ["ri-inventory"])
+    result = cli_runner.invoke(app, ["inventory", "ri"])
 
     assert result.exit_code == 1
     print_aws_error.assert_called_once_with(error)

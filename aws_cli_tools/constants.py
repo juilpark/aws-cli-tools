@@ -1,7 +1,7 @@
 from pathlib import Path
 
 APP_NAME = "aws-cli-tools"
-VERSION = "0.8.0"
+VERSION = "0.9.0"
 
 AWS_DOT_AWS_DIR = Path.home() / ".aws"
 AWS_CREDENTIALS_FILE = AWS_DOT_AWS_DIR / "credentials"

@@ -8,10 +8,10 @@
 - `login`: STS 임시 세션 토큰을 받아 `~/.aws/credentials`와 `~/.aws/config`를 갱신합니다.
 - `region-loop`: 입력한 `aws ...` 명령을 모든 AWS 리전에 반복 실행합니다.
 - `resolve-instance`: 인스턴스 ID, IP, Name 태그로 EC2 인스턴스를 찾아 리전과 메타데이터를 출력합니다.
-- `ec2-inventory`: 활성화된 모든 리전의 EC2 인스턴스를 조회해 RI/SP 검토용 CSV를 `~/Downloads/` 하위에 저장합니다.
-- `commitment-inventory`: RI/Savings Plans 적용 대상 서비스 유형과 실제 리전별 리소스를 CSV로 저장합니다.
-- `ri-inventory`: 활성화된 모든 리전의 EC2 Reserved Instance 약정을 조회해 CSV로 저장합니다.
-- `sp-inventory`: 계정의 Savings Plan 계약 현황을 조회해 적용 리전과 함께 CSV로 저장합니다.
+- `inventory ec2`: 활성화된 모든 리전의 EC2 인스턴스를 조회해 RI/SP 검토용 CSV를 `~/Downloads/` 하위에 저장합니다.
+- `inventory commitment`: RI/Savings Plans 적용 대상 서비스 유형과 실제 리전별 리소스를 CSV로 저장합니다.
+- `inventory ri`: 활성화된 모든 리전의 EC2 Reserved Instance 약정을 조회해 CSV로 저장합니다.
+- `inventory sp`: 계정의 Savings Plan 계약 현황을 조회해 적용 리전과 함께 CSV로 저장합니다.
 - `ssm`: 대상을 찾아 해당 인스턴스로 AWS SSM 세션을 시작합니다.
 - `ssm-targets`: `ssm` 브라우저에 보이는 온라인 SSM 대상 목록을 CSV로 출력합니다.
 - `version`: 현재 버전을 출력합니다.
@@ -208,7 +208,7 @@ ap-northeast-2,example-instance,i-0123456789abcdef0,10.0.0.12,-,running
 ### 7. RI/SP 검토용 EC2 인벤토리 CSV 저장
 
 ```bash
-uv run aws-cli-tools ec2-inventory
+uv run aws-cli-tools inventory ec2
 ```
 
 이 명령은 기본 프로필로 계정에서 활성화된 모든 리전의 EC2 인스턴스를 읽고, 아래 위치에 실행 시각이 붙은 CSV 파일을 생성합니다.
@@ -220,7 +220,7 @@ uv run aws-cli-tools ec2-inventory
 저장 폴더를 직접 지정할 수도 있습니다.
 
 ```bash
-uv run aws-cli-tools ec2-inventory --output-dir ~/Downloads/ri-sp-review
+uv run aws-cli-tools inventory ec2 --output-dir ~/Downloads/ri-sp-review
 ```
 
 CSV에는 다음과 같은 구매 검토용 정보가 포함됩니다.
@@ -238,7 +238,7 @@ CSV에는 다음과 같은 구매 검토용 정보가 포함됩니다.
 ### 8. 기존 RI 약정 CSV 저장
 
 ```bash
-uv run aws-cli-tools ri-inventory
+uv run aws-cli-tools inventory ri
 ```
 
 이 명령은 기본 프로필로 모든 활성화 리전의 EC2 Reserved Instance 약정을 조회하고 아래 위치에 실행 시각이 붙은 CSV를 생성합니다.
@@ -250,7 +250,7 @@ uv run aws-cli-tools ri-inventory
 저장 폴더를 직접 지정할 수도 있습니다.
 
 ```bash
-uv run aws-cli-tools ri-inventory \
+uv run aws-cli-tools inventory ri \
   --output-dir ~/Downloads/ri-sp-review
 ```
 
@@ -261,7 +261,7 @@ CSV에는 리전, RI ID, 인스턴스 타입/수량, 상태, scope, Availability
 ### 9. Savings Plan 계약 CSV 저장
 
 ```bash
-uv run aws-cli-tools sp-inventory
+uv run aws-cli-tools inventory sp
 ```
 
 이 명령은 Savings Plans API에서 계정의 계약 목록을 조회하고 아래 위치에 실행 시각이 붙은 CSV를 생성합니다.
@@ -273,7 +273,7 @@ uv run aws-cli-tools sp-inventory
 저장 폴더를 직접 지정할 수도 있습니다.
 
 ```bash
-uv run aws-cli-tools sp-inventory \
+uv run aws-cli-tools inventory sp \
   --output-dir ~/Downloads/ri-sp-review
 ```
 
@@ -286,7 +286,7 @@ Savings Plans 계약 조회는 EC2 활성화 리전을 하나씩 호출하지 �
 ### 10. RI/SP 적용 대상 리소스와 서비스 유형 CSV 저장
 
 ```bash
-uv run aws-cli-tools commitment-inventory
+uv run aws-cli-tools inventory commitment
 ```
 
 이 명령은 AWS 공식 적용 범위를 기준으로 다음 두 개의 CSV를 생성합니다.
@@ -324,12 +324,13 @@ uv run aws-cli-tools --help
 uv run aws-cli-tools login --help
 uv run aws-cli-tools region-loop --help
 uv run aws-cli-tools resolve-instance --help
-uv run aws-cli-tools commitment-inventory --help
+uv run aws-cli-tools inventory commitment --help
 uv run aws-cli-tools ssm --help
 uv run aws-cli-tools ssm-targets --help
-uv run aws-cli-tools ec2-inventory --help
-uv run aws-cli-tools ri-inventory --help
-uv run aws-cli-tools sp-inventory --help
+uv run aws-cli-tools inventory --help
+uv run aws-cli-tools inventory ec2 --help
+uv run aws-cli-tools inventory ri --help
+uv run aws-cli-tools inventory sp --help
 uv run aws-cli-tools version
 ```
 
@@ -393,7 +394,7 @@ uv run python3 main.py --help
 
 ### 버전 정보
 
-현재 문서 기준 최신 애플리케이션 버전은 `0.8.0`입니다.
+현재 문서 기준 최신 애플리케이션 버전은 `0.9.0`입니다.
 
 ## 개발 메모
 
